@@ -38,6 +38,7 @@
     "vitest": "^5.0.3"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.14.15",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.6",
