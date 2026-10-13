@@ -1,4 +1,4 @@
-import type { Entry } from '@shared/fs-types'
+import { isDirLike, type Entry } from '@shared/fs-types'
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 
@@ -53,4 +53,22 @@ export function formatMode(type: Entry['type'], mode: number): string {
     bit(0o002, 'w') +
     exec(0o001, 0o1000, 't', 'T')
   )
+}
+
+const full = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'medium' })
+
+/** Full date and time for the Properties dialog. */
+export function formatDateTime(ms: number): string {
+  return ms > 0 ? full.format(new Date(ms)) : '—'
+}
+
+/** Human description of what an entry is, following symlinks to say what they point at. */
+export function describeType(entry: Pick<Entry, 'type' | 'linkTargetType'>): string {
+  if (entry.type === 'symlink') {
+    if (entry.linkTargetType === 'broken') return 'Broken symbolic link'
+    return isDirLike(entry) ? 'Symbolic link to a folder' : 'Symbolic link to a file'
+  }
+  if (entry.type === 'dir') return 'Folder'
+  if (entry.type === 'file') return 'File'
+  return 'Special file'
 }

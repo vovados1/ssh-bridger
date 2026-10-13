@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Entry, MachineId } from './fs-types'
+import type { Entry, EntryDetails, MachineId } from './fs-types'
 
 export const MachineIdSchema = z.custom<MachineId>(
   (v) => typeof v === 'string' && (v === 'local' || /^ssh:.+/.test(v)),
@@ -23,3 +23,15 @@ export const EntrySchema = z.object({
   linkTarget: z.string().optional(),
   linkTargetType: z.enum(['file', 'dir', 'other', 'broken']).optional()
 }) satisfies z.ZodType<Entry>
+
+export const EntryDetailsSchema = EntrySchema.extend({
+  uid: z.number(),
+  gid: z.number(),
+  owner: z.string().optional(),
+  group: z.string().optional(),
+  atime: z.number(),
+  ctime: z.number()
+}) satisfies z.ZodType<EntryDetails>
+
+/** Permission bits including setuid/setgid/sticky. */
+export const ModeSchema = z.number().int().min(0).max(0o7777)

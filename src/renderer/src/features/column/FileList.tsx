@@ -4,6 +4,7 @@ import { isDirLike, type Entry } from '@shared/fs-types'
 import { useColumn, useColumnStore } from './ColumnContext'
 import { formatDate, formatMode, formatSize } from './format'
 import { EntryIcon } from './icons'
+import { RenameInput } from './RenameInput'
 import type { SortKey } from './sort'
 import styles from './FileList.module.css'
 
@@ -21,11 +22,26 @@ interface RowProps {
   top: number
   selected: boolean
   cursor: boolean
+  renaming: boolean
   onClick(e: MouseEvent, entry: Entry): void
   onOpen(entry: Entry): void
+  onContextMenu(e: MouseEvent, entry: Entry): void
+  onRenameCommit(name: string): Promise<boolean>
+  onRenameCancel(): void
 }
 
-const Row = memo(function Row({ entry, top, selected, cursor, onClick, onOpen }: RowProps) {
+const Row = memo(function Row({
+  entry,
+  top,
+  selected,
+  cursor,
+  renaming,
+  onClick,
+  onOpen,
+  onContextMenu,
+  onRenameCommit,
+  onRenameCancel
+}: RowProps) {
   const broken = entry.type === 'symlink' && entry.linkTargetType === 'broken'
   return (
     <div
@@ -40,15 +56,28 @@ const Row = memo(function Row({ entry, top, selected, cursor, onClick, onOpen }:
       style={{ height: ROW_HEIGHT, transform: `translateY(${top}px)` }}
       onClick={(e) => onClick(e, entry)}
       onDoubleClick={() => onOpen(entry)}
+      onContextMenu={(e) => {
+        e.stopPropagation() // otherwise the list would also open its background menu
+        onContextMenu(e, entry)
+      }}
     >
       <span className={`${styles.cell} ${styles.colName}`}>
         <span className={styles.icon}>
           <EntryIcon entry={entry} />
         </span>
-        <span className={styles.name} title={entry.name}>
-          {entry.name}
-        </span>
-        {entry.type === 'symlink' && (
+        {renaming ? (
+          <RenameInput
+            initial={entry.name}
+            isDir={isDirLike(entry)}
+            onCommit={onRenameCommit}
+            onCancel={onRenameCancel}
+          />
+        ) : (
+          <span className={styles.name} title={entry.name}>
+            {entry.name}
+          </span>
+        )}
+        {entry.type === 'symlink' && !renaming && (
           <span className={styles.link} title={entry.linkTarget}>
             → {entry.linkTarget ?? '?'}
             {broken && ' (broken)'}
@@ -70,7 +99,13 @@ export function rowId(path: string): string {
   return 'row-' + encodeURIComponent(path)
 }
 
-export function FileList({ pageSizeRef }: { pageSizeRef: { current: number } }) {
+interface FileListProps {
+  pageSizeRef: { current: number }
+  /** Right-click on a row (`entry`) or on empty space (`null`). */
+  onContextMenu(e: MouseEvent, entry: Entry | null): void
+}
+
+export function FileList({ pageSizeRef, onContextMenu }: FileListProps) {
   const store = useColumnStore()
   const visible = useColumn((s) => s.visible)
   const selected = useColumn((s) => s.selected)
@@ -78,6 +113,7 @@ export function FileList({ pageSizeRef }: { pageSizeRef: { current: number } }) 
   const sortKey = useColumn((s) => s.sortKey)
   const sortDir = useColumn((s) => s.sortDir)
   const cwd = useColumn((s) => s.cwd)
+  const renaming = useColumn((s) => s.renaming)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   // React Compiler is not used here, so its warning about TanStack Virtual's unmemoizable API is moot.
@@ -117,6 +153,8 @@ export function FileList({ pageSizeRef }: { pageSizeRef: { current: number } }) 
     else s.selectOnly(entry.path)
   }
   const onOpen = (entry: Entry) => void store.getState().open(entry)
+  const onRenameCommit = (name: string) => store.getState().commitRename(name)
+  const onRenameCancel = () => store.getState().cancelRename()
 
   return (
     <div
@@ -129,6 +167,7 @@ export function FileList({ pageSizeRef }: { pageSizeRef: { current: number } }) 
       onClick={(e) => {
         if (e.target === e.currentTarget) store.getState().clearSelection()
       }}
+      onContextMenu={(e) => onContextMenu(e, null)}
     >
       <div className={styles.header} role="presentation">
         {HEADERS.map((h) => (
@@ -155,8 +194,12 @@ export function FileList({ pageSizeRef }: { pageSizeRef: { current: number } }) 
               top={item.start}
               selected={selected.has(entry.path)}
               cursor={cursor === entry.path}
+              renaming={renaming === entry.path}
               onClick={onClick}
               onOpen={onOpen}
+              onContextMenu={onContextMenu}
+              onRenameCommit={onRenameCommit}
+              onRenameCancel={onRenameCancel}
             />
           )
         })}

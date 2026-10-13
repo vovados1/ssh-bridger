@@ -140,3 +140,17 @@
   color: var(--muted);
   text-align: center;
 }
+
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+  user-select: text;
+}

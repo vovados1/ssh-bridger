@@ -1,7 +1,16 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import { FsError, isDirLike, type Entry, type FsErrorData, type MachineId } from '@shared/fs-types'
-import { parentOf, resolveInput } from '@shared/posix-path'
+import {
+  FsError,
+  isDirLike,
+  type Entry,
+  type EntryDetails,
+  type FsErrorData,
+  type MachineId
+} from '@shared/fs-types'
+import { nameProblem, uniqueName } from '@shared/names'
+import { joinPath, parentOf, resolveInput } from '@shared/posix-path'
 import type { FsClient } from '../../lib/fs-client'
+import type { Notify } from '../../lib/toasts'
 import { computeVisible, type SortDir, type SortKey } from './sort'
 
 export interface ColumnState {
@@ -25,6 +34,8 @@ export interface ColumnState {
   cursor: string | null
   /** Where shift-selection ranges start. */
   anchor: string | null
+  /** Path of the entry whose name is being edited inline. */
+  renaming: string | null
 
   init(): Promise<void>
   /** Go to a typed or clicked path. `~` and relative paths are resolved. */
@@ -36,6 +47,8 @@ export interface ColumnState {
   open(entry: Entry): Promise<void>
   openCursor(): Promise<void>
   clearError(): void
+  /** Stop watching and listening; call when the column goes away. */
+  dispose(): void
 
   toggleHidden(): void
   setSort(key: SortKey): void
@@ -47,20 +60,47 @@ export interface ColumnState {
   clearSelection(): void
   moveCursor(delta: number, extend: boolean): void
   cursorTo(where: 'first' | 'last', extend: boolean): void
+
+  /** Selected entries in list order. */
+  selectedEntries(): Entry[]
+  /** Create "New Folder"/"New File" here, select it and start renaming it. */
+  create(kind: 'folder' | 'file'): Promise<void>
+  startRename(path?: string): void
+  cancelRename(): void
+  /** False (and still renaming) when the new name is invalid or taken. */
+  commitRename(newName: string): Promise<boolean>
+  remove(paths: string[], options: { permanent: boolean }): Promise<void>
+  chmod(paths: string[], mode: number): Promise<void>
+  details(path: string): Promise<EntryDetails>
 }
 
 export interface ColumnStoreOptions {
   machineId: MachineId
   fs: FsClient
+  notify: Notify
+  /** Names this column's watch so main can tell columns apart. */
+  watchKey?: string
 }
 
 export type ColumnStore = StoreApi<ColumnState>
 
 type HistoryMode = 'push' | 'keep'
 
-export function createColumnStore({ machineId, fs }: ColumnStoreOptions): ColumnStore {
+function errorData(err: unknown): FsErrorData {
+  return err instanceof FsError
+    ? err.toData()
+    : { code: 'EUNKNOWN', message: err instanceof Error ? err.message : String(err) }
+}
+
+export function createColumnStore({
+  machineId,
+  fs,
+  notify,
+  watchKey = 'column'
+}: ColumnStoreOptions): ColumnStore {
   /** Only the latest listing request may apply its result; older ones are stale. */
   let requestSeq = 0
+  let unsubscribe: (() => void) | undefined
 
   return createStore<ColumnState>()((set, get) => {
     /**
@@ -96,6 +136,9 @@ export function createColumnStore({ machineId, fs }: ColumnStoreOptions): Column
         }
         cursor ??= visible[0]?.path ?? null
 
+        const renaming = s.renaming && paths.has(s.renaming) ? s.renaming : null
+        const folderChanged = path !== s.cwd
+
         let { history: hist, historyIndex } = s
         if (history === 'push' && hist[historyIndex] !== path) {
           hist = [...hist.slice(0, historyIndex + 1), path]
@@ -108,22 +151,18 @@ export function createColumnStore({ machineId, fs }: ColumnStoreOptions): Column
           selected,
           cursor,
           anchor,
+          renaming,
           history: hist,
           historyIndex,
           loading: false,
           error: null
         })
+        // Fire and forget: if live updates aren't available, manual refresh still works.
+        if (folderChanged) void fs.watch(machineId, path, watchKey).catch(() => {})
         return true
       } catch (err) {
         if (seq !== requestSeq) return false
-        const data =
-          err instanceof FsError
-            ? err.toData()
-            : {
-                code: 'EUNKNOWN' as const,
-                message: err instanceof Error ? err.message : String(err)
-              }
-        set({ loading: false, error: data })
+        set({ loading: false, error: errorData(err) })
         return false
       }
     }
@@ -180,18 +219,26 @@ export function createColumnStore({ machineId, fs }: ColumnStoreOptions): Column
       selected: new Set(),
       cursor: null,
       anchor: null,
+      renaming: null,
 
       async init() {
+        unsubscribe?.()
+        unsubscribe = fs.onChanged((key) => {
+          if (key === watchKey) void get().refresh()
+        })
         try {
           const home = await fs.home(machineId)
           set({ home })
           await load(home, 'push')
         } catch (err) {
-          set({
-            error:
-              err instanceof FsError ? err.toData() : { code: 'EUNKNOWN', message: String(err) }
-          })
+          set({ error: errorData(err) })
         }
+      },
+
+      dispose() {
+        unsubscribe?.()
+        unsubscribe = undefined
+        void fs.unwatch(watchKey).catch(() => {})
       },
 
       async navigate(input) {
@@ -224,7 +271,17 @@ export function createColumnStore({ machineId, fs }: ColumnStoreOptions): Column
 
       async refresh() {
         const { cwd } = get()
-        if (cwd !== null) await load(cwd, 'keep', { keepSelection: true })
+        if (cwd === null) return
+        if (await load(cwd, 'keep', { keepSelection: true })) return
+        if (get().error?.code !== 'ENOENT') return
+        // The folder we were showing was deleted or renamed away: fall back to the nearest one that exists.
+        for (let dir = parentOf(cwd); ; dir = parentOf(dir)) {
+          if (await load(dir, 'push')) {
+            notify({ kind: 'info', message: `"${cwd}" no longer exists; moved to "${dir}"` })
+            return
+          }
+          if (dir === '/' || get().error?.code !== 'ENOENT') return
+        }
       },
 
       async open(entry) {
@@ -282,6 +339,134 @@ export function createColumnStore({ machineId, fs }: ColumnStoreOptions): Column
 
       cursorTo(where, extend) {
         placeCursor(where === 'first' ? 0 : get().visible.length - 1, extend)
+      },
+
+      selectedEntries() {
+        const { visible, selected } = get()
+        return visible.filter((e) => selected.has(e.path))
+      },
+
+      async create(kind) {
+        const { cwd, entries } = get()
+        if (cwd === null) return
+        const base = kind === 'folder' ? 'New Folder' : 'New File'
+        const taken = new Set(entries.map((e) => e.name))
+        // Another process may grab the name between the listing and the create; just take the next one.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const path = joinPath(cwd, uniqueName(base, taken))
+          try {
+            await (kind === 'folder' ? fs.mkdir(machineId, path) : fs.createFile(machineId, path))
+          } catch (err) {
+            if (err instanceof FsError && err.code === 'EEXIST') {
+              taken.add(path.slice(cwd.length + (cwd === '/' ? 0 : 1)))
+              continue
+            }
+            notify({ kind: 'error', message: errorData(err).message })
+            return
+          }
+          if (get().cwd !== cwd) return // the user moved on; the new item is in the old folder
+          await load(cwd, 'keep', { cursor: path })
+          if (get().cursor === path) set({ renaming: path })
+          return
+        }
+        notify({ kind: 'error', message: `Could not find a free name for the new ${kind}` })
+      },
+
+      startRename(path) {
+        const target = path ?? get().cursor
+        if (target !== null && get().visible.some((e) => e.path === target)) {
+          set({ renaming: target, cursor: target, anchor: target, selected: new Set([target]) })
+        }
+      },
+
+      cancelRename() {
+        set({ renaming: null })
+      },
+
+      async commitRename(newName) {
+        const { renaming, cwd, entries } = get()
+        if (renaming === null || cwd === null) return false
+        const oldName = renaming.slice(renaming.lastIndexOf('/') + 1)
+        if (newName === oldName) {
+          set({ renaming: null })
+          return true
+        }
+        const problem = nameProblem(newName)
+        if (problem !== null) {
+          notify({ kind: 'error', message: problem })
+          return false
+        }
+        if (entries.some((e) => e.name === newName)) {
+          notify({ kind: 'error', message: `"${newName}" already exists` })
+          return false
+        }
+        const target = joinPath(parentOf(renaming), newName)
+        set({ renaming: null })
+        try {
+          await fs.rename(machineId, renaming, target)
+        } catch (err) {
+          notify({ kind: 'error', message: errorData(err).message })
+          await get().refresh()
+          return false
+        }
+        if (get().cwd === cwd) await load(cwd, 'keep', { cursor: target })
+        return true
+      },
+
+      async remove(paths, { permanent }) {
+        const { cwd, visible } = get()
+        if (cwd === null || paths.length === 0) return
+        const firstIndex = Math.min(
+          ...paths.map((p) => visible.findIndex((e) => e.path === p)).filter((i) => i >= 0)
+        )
+        const failures: string[] = []
+        for (const path of paths) {
+          try {
+            await fs.remove(machineId, path, { recursive: true, toTrash: !permanent })
+          } catch (err) {
+            failures.push(errorData(err).message)
+          }
+        }
+        if (failures.length > 0) {
+          notify({
+            kind: 'error',
+            message:
+              paths.length === 1
+                ? failures[0]!
+                : `Could not delete ${failures.length} of ${paths.length} items: ${failures[0]}`
+          })
+        }
+        if (get().cwd !== cwd) return
+        if (await load(cwd, 'keep')) {
+          // Land on the item that took the deleted one's place, like a file manager would.
+          const next = get().visible[Math.min(firstIndex, get().visible.length - 1)]
+          if (next && get().selected.size === 0) get().selectOnly(next.path)
+        }
+      },
+
+      async chmod(paths, mode) {
+        const failures: string[] = []
+        for (const path of paths) {
+          try {
+            await fs.chmod(machineId, path, mode)
+          } catch (err) {
+            failures.push(errorData(err).message)
+          }
+        }
+        if (failures.length > 0) {
+          notify({
+            kind: 'error',
+            message:
+              paths.length === 1
+                ? failures[0]!
+                : `Could not change ${failures.length} of ${paths.length} items: ${failures[0]}`
+          })
+        }
+        await get().refresh()
+      },
+
+      details(path) {
+        return fs.details(machineId, path)
       }
     }
   })

@@ -23,6 +23,18 @@ export interface Entry {
   linkTargetType?: 'file' | 'dir' | 'other' | 'broken'
 }
 
+/** Everything `Entry` has plus what only the Properties dialog needs. */
+export interface EntryDetails extends Entry {
+  uid: number
+  gid: number
+  /** Resolved names when the machine can provide them; otherwise show the numeric ids. */
+  owner?: string
+  group?: string
+  /** Last access / status-change time, ms since epoch. */
+  atime: number
+  ctime: number
+}
+
 export const FS_ERROR_CODES = [
   'ENOENT',
   'EACCES',

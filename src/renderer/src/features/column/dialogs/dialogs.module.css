@@ -1,0 +1,67 @@
+.note {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  font-size: 12px;
+}
+
+.grid {
+  border-collapse: collapse;
+}
+
+.grid th,
+.grid td {
+  padding: 4px 14px 4px 0;
+  text-align: left;
+  font-weight: 400;
+}
+
+.grid thead th {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.special {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0;
+}
+
+.special label,
+.octal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.octal input {
+  width: 72px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+}
+
+.octal input[aria-invalid='true'] {
+  border-color: var(--error-fg);
+}
+
+.props {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.props dt {
+  color: var(--muted);
+}
+
+.props dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
