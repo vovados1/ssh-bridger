@@ -37,6 +37,22 @@ Each connection opens as another column with the same file operations as the loc
 Integration tests start a real `sshd` as your user (needs `/usr/bin/sshd` and `sftp-server`); they skip
 themselves if OpenSSH's server isn't installed.
 
+## Columns and transfers
+
+- **Columns:** add a local column from the Connect menu, drag a header to reorder, drag a divider (or
+  focus it and use the arrow keys) to resize. Columns, widths and folders are restored on the next
+  launch; remote columns come back disconnected until you press Reconnect.
+- **Drag and drop** items between columns, or drop files from your desktop onto one. Within a machine a
+  drop moves; between machines it copies. Hold **Ctrl** to force a copy, **Shift** to force a move.
+  Ctrl+C / Ctrl+X / Ctrl+V work across columns too.
+- **Safe copies:** each file is written to a `.sshbridger-part` name, size-checked, given its
+  permissions and times, then renamed into place, so an interrupted copy never leaves a half-written
+  file under the real name. A move across machines deletes each source file only after its copy is
+  verified. When a name is taken you choose Overwrite, Skip, Keep both or Overwrite if newer, for one
+  file or for all of them.
+- **The transfer panel** at the bottom shows progress, speed and time left; you can cancel a job,
+  and retry one that had errors (it skips what already arrived).
+
 ## Keyboard shortcuts
 
 | Key                           | Action                                 |

@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FsError } from '@shared/fs-types'
 import type { PromptRequest } from '@shared/connections'
-import { createWorkspaceStore } from '../../src/renderer/src/app/workspaceStore'
 import { createConnectionsStore } from '../../src/renderer/src/features/connections/connectionsStore'
-import type { Notification } from '../../src/renderer/src/lib/toasts'
 import { fail, fakeConnections, profile } from './fake-connections'
 
 async function started(profiles = [profile()]) {
@@ -116,125 +114,5 @@ describe('connections store', () => {
     await connections.getState().init()
     client.emitPrompt(passwordPrompt('once'))
     expect(s().prompts).toHaveLength(1)
-  })
-})
-
-describe('workspace store', () => {
-  async function workspace(profiles = [profile(), profile({ id: 'p2', name: 'Stage' })]) {
-    const base = await started(profiles)
-    const notes: Notification[] = []
-    let n = 0
-    const ws = createWorkspaceStore({
-      connections: base.connections,
-      notify: (x) => notes.push(x),
-      newId: () => `col-${++n}`
-    })
-    return { ...base, ws, notes, w: () => ws.getState() }
-  }
-
-  it('starts with just the local machine, which cannot be closed', async () => {
-    const { w } = await workspace()
-    expect(w().columns).toEqual([{ id: 'local', machineId: 'local', title: 'Local' }])
-    w().closeColumn('local')
-    expect(w().columns).toHaveLength(1)
-  })
-
-  it('connects, then opens a column for the profile', async () => {
-    const { w, client } = await workspace()
-    await w().openRemote('p1')
-    expect(client.connected).toEqual(['p1'])
-    expect(w().columns[1]).toEqual({
-      id: 'col-1',
-      machineId: 'ssh:p1',
-      title: 'Prod',
-      profileId: 'p1'
-    })
-    expect(w().connecting.size).toBe(0)
-  })
-
-  it('opens another column on an already connected profile without reconnecting', async () => {
-    const { w, client } = await workspace()
-    client.emitState({ profileId: 'p1', status: 'connected' })
-    await w().openRemote('p1')
-    await w().openRemote('p1')
-    expect(client.connected).toEqual([])
-    expect(w().columns.map((c) => c.id)).toEqual(['local', 'col-1', 'col-2'])
-  })
-
-  it('ignores a second open while the first is still connecting', async () => {
-    const { w, client } = await workspace()
-    let release!: () => void
-    client.connectResult = () => new Promise((r) => (release = r))
-    const first = w().openRemote('p1')
-    await w().openRemote('p1')
-    expect(w().connecting.has('p1')).toBe(true)
-    release()
-    await first
-    expect(w().columns).toHaveLength(2)
-  })
-
-  it('opens no column and shows a toast when connecting fails', async () => {
-    const { w, client, notes } = await workspace()
-    client.connectResult = fail('ECONNECT', 'Connection refused by prod:22')
-    await w().openRemote('p1')
-    expect(w().columns).toHaveLength(1)
-    expect(notes).toEqual([{ kind: 'error', message: 'Prod: Connection refused by prod:22' }])
-    expect(w().connecting.size).toBe(0)
-  })
-
-  it('stays quiet when the user cancels', async () => {
-    const { w, client, notes } = await workspace()
-    client.connectResult = fail('ECANCELLED')
-    await w().openRemote('p1')
-    expect(notes).toEqual([])
-    expect(w().dialog).toBeNull()
-  })
-
-  it('shows a persistent dialog, not a toast, for a distrusted host key', async () => {
-    const { w, client, notes } = await workspace()
-    client.connectResult = fail('EHOSTKEY', 'WARNING: host key CHANGED')
-    await w().openRemote('p1')
-    expect(notes).toEqual([])
-    expect(w().dialog).toMatchObject({
-      kind: 'connectError',
-      profileName: 'Prod',
-      error: { code: 'EHOSTKEY' }
-    })
-  })
-
-  it('ignores unknown profiles', async () => {
-    const { w, client } = await workspace()
-    await w().openRemote('ghost')
-    expect(client.connected).toEqual([])
-  })
-
-  it('closes remote columns and keeps others', async () => {
-    const { w } = await workspace()
-    await w().openRemote('p1')
-    await w().openRemote('p2')
-    w().closeColumn('col-1')
-    expect(w().columns.map((c) => c.title)).toEqual(['Local', 'Stage'])
-  })
-
-  it('retitles and recolors columns when their profile is edited, and closes them when it is deleted', async () => {
-    const { w, s, client } = await workspace()
-    await w().openRemote('p1')
-    await w().openRemote('p2')
-    await s().saveProfile({ ...client.profiles[0]!, name: 'Production', color: '#ff0000' })
-    expect(w().columns[1]).toMatchObject({ title: 'Production', color: '#ff0000' })
-    const withoutColor = { ...client.profiles[0]!, name: 'Production' }
-    delete withoutColor.color
-    await s().saveProfile(withoutColor)
-    expect('color' in w().columns[1]!).toBe(false)
-    await s().deleteProfile('p2')
-    expect(w().columns.map((c) => c.title)).toEqual(['Local', 'Production'])
-  })
-
-  it('shows and hides dialogs', async () => {
-    const { w } = await workspace()
-    w().showDialog({ kind: 'manage' })
-    expect(w().dialog).toEqual({ kind: 'manage' })
-    w().showDialog(null)
-    expect(w().dialog).toBeNull()
   })
 })

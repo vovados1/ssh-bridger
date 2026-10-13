@@ -33,7 +33,7 @@ any two of them.
 | UI              | React 19                                                 | —                                                                                                                           |
 | State           | Zustand                                                  | Small, works well with per-column stores                                                                                    |
 | Big lists       | `@tanstack/react-virtual`                                | Directories with 10k+ entries                                                                                               |
-| Column layout   | `react-resizable-panels`                                 | Resizable side-by-side columns                                                                                              |
+| Column layout   | custom splitters (pointer events)                        | Resizable side-by-side columns                                                                                              |
 | Styling         | CSS Modules + CSS variables (light/dark)                 | No runtime cost. Easy to theme                                                                                              |
 | SSH/SFTP        | `ssh2`                                                   | Pure JS, mature, supports agent/keys/password/keyboard-interactive, multiple SFTP channels, and jump hosts via `forwardOut` |
 | SSH config      | `ssh-config`                                             | Parse `~/.ssh/config` for host aliases                                                                                      |
@@ -147,12 +147,12 @@ the UI shows one kind of error regardless of machine.
 
 - A **job** is a user action (a drop or paste). It expands into **tasks** (one per file, plus
   directory creates) via a recursive walk of the source.
-- **Execution paths**:
-  - local → remote: `sftp.fastPut` (parallel requests, much faster than streaming)
-  - remote → local: `sftp.fastGet`
-  - remote → remote, or same remote across two profiles: pipe `createReadStream` from A into
-    `createWriteStream` on B, through the app
-  - same machine: `rename` for move. Copy uses `fs.cp` locally, or a stream remotely
+- **Execution paths**: every copy is the same pipeline, `openRead` on the source piped into
+  `openWrite` on the destination, so local, SFTP and remote-to-remote behave identically and can
+  all be cancelled and measured. SFTP streams keep up to 64 requests in flight (our own
+  pipelined reader/writer; `fastPut`/`fastGet` cannot be cancelled and would not give per-byte
+  progress). A same-machine move is a `rename`, falling back to copy + delete if that fails.
+  Transfers use their own SFTP channel so browsing stays responsive.
 - **Safe writes**: write to `name.sshbridger-part`, then rename over the target. Preserve mode
   and mtime (setting, on by default).
 - **Move across machines** = copy, verify the size matches, then delete the source. If any task

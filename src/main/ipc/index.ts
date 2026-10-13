@@ -17,8 +17,10 @@ import { importAliases } from '../ssh/import'
 import { KnownHostsFile } from '../ssh/known-hosts'
 import { PromptBroker } from '../ssh/prompter'
 import { listCandidates } from '../ssh/ssh-config'
+import { LayoutStore } from '../store/layout-store'
 import { ProfileStore } from '../store/profile-store'
 import { SecretStore, type Cipher } from '../store/secret-store'
+import { TransferManager } from '../transfer/transfer-manager'
 import { handle } from './register'
 import { WatchManager } from './watches'
 
@@ -75,6 +77,14 @@ export async function registerIpcHandlers(): Promise<() => Promise<void>> {
     localUsername: userInfo().username,
     homeDir: homedir(),
     onState: (state) => void broadcast('conn:state', state)
+  })
+
+  const layout = new LayoutStore(join(dataDir, 'layout.json'))
+  const transfers = new TransferManager({
+    machines: machines,
+    emitUpdate: (jobs) => void broadcast('transfer:update', { jobs }),
+    emitConflict: (prompt) => void broadcast('transfer:conflict', prompt),
+    emitConflictCancel: (id) => void broadcast('transfer:conflictCancel', { id })
   })
 
   /** Clean up a window's watches once, when it goes away. */
@@ -150,5 +160,22 @@ export async function registerIpcHandlers(): Promise<() => Promise<void>> {
   handle('conn:states', () => connections.states())
   handle('conn:respond', ({ id, response }) => prompts.respond(id, response))
 
-  return () => connections.shutdown()
+  // ---- transfers ----
+  handle('transfer:start', async (request) => ({ jobId: await transfers.start(request) }))
+  handle('transfer:cancel', ({ jobId }) => transfers.cancel(jobId))
+  handle('transfer:resolve', ({ conflictId, resolution, applyToAll }) =>
+    transfers.resolveConflict(conflictId, { resolution, applyToAll })
+  )
+  handle('transfer:retry', async ({ jobId }) => ({ jobId: await transfers.retry(jobId) }))
+  handle('transfer:clear', ({ jobId }) => transfers.clear(jobId))
+  handle('transfer:list', () => transfers.list())
+
+  // ---- layout ----
+  handle('layout:load', () => layout.load())
+  handle('layout:save', (value) => layout.save(value))
+
+  return async () => {
+    transfers.shutdown()
+    await connections.shutdown()
+  }
 }

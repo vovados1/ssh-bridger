@@ -1,27 +1,24 @@
+import { randomBytes } from 'node:crypto'
 import {
   chmod,
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   readdir,
+  readFile,
+  readlink,
   rm,
   symlink,
   writeFile
 } from 'node:fs/promises'
-import { tmpdir, userInfo } from 'node:os'
+import { pipeline } from 'node:stream/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FsError } from '@shared/fs-types'
-import { sshMachineId } from '@shared/connections'
 import { LocalProvider } from '../../src/main/fs/local-provider'
-import { MachineRegistry } from '../../src/main/fs/registry'
 import type { FileSystemProvider } from '../../src/main/fs/provider'
-import { ConnectionManager } from '../../src/main/ssh/connection-manager'
-import { KnownHostsFile } from '../../src/main/ssh/known-hosts'
-import { silentPrompter } from '../../src/main/ssh/prompter'
-import { ProfileStore } from '../../src/main/store/profile-store'
-import { SecretStore } from '../../src/main/store/secret-store'
+import { connectSftp as sharedConnectSftp } from '../helpers/sftp-fixture'
 import { sshdAvailable, startSshd, type TestSshd } from '../helpers/sshd'
 
 /**
@@ -63,44 +60,14 @@ const local: Backend = {
   }
 }
 
+async function connectSftp(server: TestSshd, port = server.port) {
+  return sharedConnectSftp(server, root, port)
+}
+
 const sftp: Backend = {
   name: 'SftpProvider (real sshd)',
   trash: false,
-  async setup() {
-    const server = sshd!
-    const dir = await mkdtemp(join(root, 'sftp-'))
-    const profiles = new ProfileStore(join(dir, 'profiles.json'))
-    await profiles.load()
-    const knownHosts = new KnownHostsFile(join(dir, 'known_hosts'))
-    await knownHosts.add('127.0.0.1', server.port, 'ssh-ed25519', server.hostKeyLine.split(' ')[1]!)
-    const registry = new MachineRegistry()
-    const manager = new ConnectionManager({
-      profiles,
-      secrets: new SecretStore(join(dir, 'secrets.json'), {
-        isAvailable: () => false,
-        encrypt: () => Buffer.alloc(0),
-        decrypt: () => ''
-      }),
-      prompter: silentPrompter,
-      knownHosts,
-      registry,
-      readSshConfig: async () => null,
-      agentSocket: undefined,
-      localUsername: userInfo().username,
-      homeDir: dir,
-      onState: () => {}
-    })
-    const profile = await profiles.save({
-      name: 'contract',
-      host: '127.0.0.1',
-      port: server.port,
-      username: userInfo().username,
-      authMethods: ['publickey'],
-      identityFile: server.clientKey
-    })
-    await manager.connect(profile.id)
-    return { provider: registry.get(sshMachineId(profile.id)), teardown: () => manager.shutdown() }
-  }
+  setup: () => connectSftp(sshd!)
 }
 
 const byName = <T extends { name: string }>(xs: T[]): Record<string, T> =>
@@ -440,6 +407,149 @@ for (const backend of [local, sftp]) {
         }
       })
 
+      describe('streams', () => {
+        const write = async (
+          path: string,
+          data: Buffer,
+          opts?: { mode?: number; exclusive?: boolean }
+        ) => {
+          const out = await p.openWrite(path, opts)
+          await new Promise<void>((resolve, reject) => {
+            out.once('error', reject)
+            out.once('close', resolve)
+            out.end(data)
+          })
+        }
+        const read = async (path: string, opts?: { start?: number }) => {
+          const chunks: Buffer[] = []
+          const input = await p.openRead(path, opts)
+          for await (const chunk of input) chunks.push(chunk as Buffer)
+          return Buffer.concat(chunks)
+        }
+
+        it('round-trips a multi-megabyte file byte for byte', async () => {
+          const dir = await fresh()
+          const data = randomBytes(5 * 1024 * 1024 + 123) // not a multiple of any chunk size
+          await write(join(dir, 'big.bin'), data)
+          expect(Buffer.compare(await readFile(join(dir, 'big.bin')), data)).toBe(0)
+          expect(Buffer.compare(await read(join(dir, 'big.bin')), data)).toBe(0)
+        })
+
+        it('handles empty files and files smaller than a chunk', async () => {
+          const dir = await fresh()
+          await write(join(dir, 'empty'), Buffer.alloc(0))
+          await write(join(dir, 'tiny'), Buffer.from('hi'))
+          expect((await read(join(dir, 'empty'))).length).toBe(0)
+          expect((await read(join(dir, 'tiny'))).toString()).toBe('hi')
+          expect((await lstat(join(dir, 'empty'))).size).toBe(0)
+        })
+
+        it('reads from a byte offset', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'f'), '0123456789')
+          expect((await read(join(dir, 'f'), { start: 4 })).toString()).toBe('456789')
+        })
+
+        it('truncates an existing file when writing, and refuses with exclusive', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'f'), 'a much longer original')
+          await expect(p.openWrite(join(dir, 'f'), { exclusive: true })).rejects.toMatchObject({
+            code: 'EEXIST'
+          })
+          expect(await readFile(join(dir, 'f'), 'utf8')).toBe('a much longer original')
+          await write(join(dir, 'f'), Buffer.from('short'))
+          expect(await readFile(join(dir, 'f'), 'utf8')).toBe('short')
+        })
+
+        it('applies the creation mode', async () => {
+          const dir = await fresh()
+          await write(join(dir, 'private'), Buffer.from('x'), { mode: 0o600 })
+          expect((await lstat(join(dir, 'private'))).mode & 0o777).toBe(0o600)
+        })
+
+        it('maps open errors onto FsError codes', async () => {
+          const dir = await fresh()
+          await expect(p.openRead(join(dir, 'missing'))).rejects.toMatchObject({ code: 'ENOENT' })
+          await expect(p.openWrite(join(dir, 'no', 'such', 'dir'))).rejects.toMatchObject({
+            code: 'ENOENT'
+          })
+        })
+
+        it('can be abandoned halfway without breaking the connection', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'f'), randomBytes(2 * 1024 * 1024))
+          const input = await p.openRead(join(dir, 'f'))
+          await new Promise<void>((resolve) => {
+            input.once('data', () => {
+              input.destroy()
+              resolve()
+            })
+          })
+          expect((await p.list(dir)).map((e) => e.name)).toEqual(['f']) // still usable afterwards
+        })
+
+        it('pipelines into a node stream pipeline end to end', async () => {
+          const dir = await fresh()
+          const data = randomBytes(700_000)
+          await writeFile(join(dir, 'src'), data)
+          await pipeline(await p.openRead(join(dir, 'src')), await p.openWrite(join(dir, 'dst')))
+          expect(Buffer.compare(await readFile(join(dir, 'dst')), data)).toBe(0)
+        })
+      })
+
+      describe('setTimes / symlink / rename overwrite', () => {
+        it('sets the modification time', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'f'), '')
+          const when = Date.UTC(2020, 5, 15, 12, 0, 0)
+          await p.setTimes(join(dir, 'f'), when)
+          expect(Math.abs((await lstat(join(dir, 'f'))).mtimeMs - when)).toBeLessThan(1500)
+          await expect(p.setTimes(join(dir, 'nope'), when)).rejects.toMatchObject({
+            code: 'ENOENT'
+          })
+        })
+
+        it('creates symlinks that point where asked, relative or absolute, even dangling', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'target'), 'x')
+          await p.symlink('target', join(dir, 'rel'))
+          await p.symlink(join(dir, 'target'), join(dir, 'abs'))
+          await p.symlink('missing', join(dir, 'dangling'))
+          expect(await readlink(join(dir, 'rel'))).toBe('target')
+          expect(await readlink(join(dir, 'abs'))).toBe(join(dir, 'target'))
+          expect(await readlink(join(dir, 'dangling'))).toBe('missing')
+          await expect(p.symlink('x', join(dir, 'rel'))).rejects.toMatchObject({ code: 'EEXIST' })
+        })
+
+        it('replaces an existing file when overwrite is set, keeping the new content', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'new'), 'NEW')
+          await writeFile(join(dir, 'old'), 'OLD')
+          await expect(p.rename(join(dir, 'new'), join(dir, 'old'))).rejects.toMatchObject({
+            code: 'EEXIST'
+          })
+          await p.rename(join(dir, 'new'), join(dir, 'old'), { overwrite: true })
+          expect(await readFile(join(dir, 'old'), 'utf8')).toBe('NEW')
+          expect(await readdir(dir)).toEqual(['old'])
+        })
+
+        it('overwrite never replaces a folder', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'f'), 'x')
+          await mkdir(join(dir, 'd'))
+          await expect(
+            p.rename(join(dir, 'f'), join(dir, 'd'), { overwrite: true })
+          ).rejects.toMatchObject({ code: 'EEXIST' })
+        })
+
+        it('overwrite onto a missing target is a plain rename', async () => {
+          const dir = await fresh()
+          await writeFile(join(dir, 'a'), 'A')
+          await p.rename(join(dir, 'a'), join(dir, 'b'), { overwrite: true })
+          expect(await readdir(dir)).toEqual(['b'])
+        })
+      })
+
       describe('chmod', () => {
         it('sets permission bits including special ones', async () => {
           const dir = await fresh()
@@ -458,6 +568,34 @@ for (const backend of [local, sftp]) {
     }
   )
 }
+
+describe.skipIf(!sshdAvailable)('SFTP throughput on a slow link', () => {
+  it('pipelines requests, so latency does not cap the transfer speed', async () => {
+    const { startProxy } = await import('../helpers/tcp-proxy')
+    const proxy = await startProxy(sshd!.port, 15) // 30 ms round trip
+    const { provider, teardown } = await connectSftp(sshd!, proxy.port)
+    try {
+      const dir = await mkdtemp(join(root, 'slow-'))
+      const data = randomBytes(8 * 1024 * 1024)
+      await writeFile(join(dir, 'src'), data)
+
+      // One request per round trip would take 8 MB / 32 KB * 30 ms = 7.7 s in each direction.
+      let t0 = Date.now()
+      await pipeline(
+        await provider.openRead(join(dir, 'src')),
+        await provider.openWrite(join(dir, 'up'))
+      )
+      const roundTrip = Date.now() - t0
+      expect(Buffer.compare(await readFile(join(dir, 'up')), data)).toBe(0)
+      console.log(`INFO  8 MB read+write over a 30 ms link: ${roundTrip} ms`)
+      expect(roundTrip).toBeLessThan(6000)
+      t0 = Date.now()
+    } finally {
+      await teardown()
+      await proxy.stop()
+    }
+  }, 30_000)
+})
 
 describe('provider differences that are intentional', () => {
   it('only the local provider can watch folders', async () => {

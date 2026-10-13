@@ -66,7 +66,8 @@ class Connection implements SftpSource {
   /** Host keys the user chose to trust for this session only. */
   readonly trustedThisSession = new Set<string>()
   readonly provider: SftpProvider
-  private channel: Promise<SFTPWrapper> | undefined
+  /** One SFTP channel for browsing and one for transfers, opened on demand. */
+  private readonly channels = new Map<'browse' | 'transfer', Promise<SFTPWrapper>>()
 
   constructor(public profile: ConnectionProfile) {
     this.resolved = profile
@@ -77,7 +78,7 @@ class Connection implements SftpSource {
     return this.resolved.defaultPath
   }
 
-  sftp(): Promise<SFTPWrapper> {
+  sftp(purpose: 'browse' | 'transfer' = 'browse'): Promise<SFTPWrapper> {
     const client = this.client
     if (this.status !== 'connected' || !client) {
       const why = this.status === 'reconnecting' ? 'is being restored' : 'is closed'
@@ -85,25 +86,29 @@ class Connection implements SftpSource {
         fail('EDISCONNECTED', `The connection to "${this.profile.name}" ${why}`)
       )
     }
-    this.channel ??= new Promise<SFTPWrapper>((resolve, reject) => {
-      client.sftp((err, sftp) => {
-        if (err) return reject(err)
-        const forget = (): void => {
-          this.channel = undefined
-        }
-        sftp.once('close', forget)
-        sftp.once('end', forget)
-        resolve(sftp)
+    let channel = this.channels.get(purpose)
+    if (!channel) {
+      channel = new Promise<SFTPWrapper>((resolve, reject) => {
+        client.sftp((err, sftp) => {
+          if (err) return reject(err)
+          const forget = (): void => {
+            this.channels.delete(purpose)
+          }
+          sftp.once('close', forget)
+          sftp.once('end', forget)
+          resolve(sftp)
+        })
+      }).catch((err: unknown) => {
+        this.channels.delete(purpose)
+        throw err
       })
-    }).catch((err: unknown) => {
-      this.channel = undefined
-      throw err
-    })
-    return this.channel
+      this.channels.set(purpose, channel)
+    }
+    return channel
   }
 
   dropChannel(): void {
-    this.channel = undefined
+    this.channels.clear()
   }
 }
 

@@ -1,3 +1,4 @@
+import type { Readable, Writable } from 'node:stream'
 import type { SFTPWrapper, Stats } from 'ssh2'
 import {
   FsError,
@@ -9,12 +10,16 @@ import {
 import { baseName, joinPath } from '@shared/posix-path'
 import { mapLimit } from './async'
 import { toFsError } from './errors'
-import type { FileSystemProvider, RemoveOptions } from './provider'
+import type { FileSystemProvider, RemoveOptions, RenameOptions } from './provider'
+import { SftpReadStream, SftpWriteStream } from './sftp-streams'
 
 /** Where a provider gets its SFTP channel from. The connection owns it and may replace it after a reconnect. */
 export interface SftpSource {
-  /** Rejects with EDISCONNECTED while the connection is down. */
-  sftp(): Promise<SFTPWrapper>
+  /**
+   * An SFTP channel. Transfers get their own so a big copy can't make folder listings wait
+   * behind it. Rejects with EDISCONNECTED while the connection is down.
+   */
+  sftp(purpose?: 'browse' | 'transfer'): Promise<SFTPWrapper>
   /** Folder to start in; the remote home when unset. */
   readonly defaultPath: string | undefined
 }
@@ -23,6 +28,7 @@ export interface SftpSource {
 const STATUS_NO_SUCH_FILE = 2
 const STATUS_PERMISSION_DENIED = 3
 const STATUS_FAILURE = 4
+const STATUS_OP_UNSUPPORTED = 8
 
 const S_IFMT = 0o170000
 const TYPE_BY_FORMAT: Record<number, EntryType> = {
@@ -145,23 +151,74 @@ export class SftpProvider implements FileSystemProvider {
     }
   }
 
-  async rename(from: string, to: string): Promise<void> {
+  async rename(from: string, to: string, { overwrite = false }: RenameOptions = {}): Promise<void> {
     const sftp = await this.source.sftp()
     try {
-      // SFTP servers differ on whether rename replaces the target; never rely on it.
       const taken = await this.lstat(sftp, to).then(
-        () => true,
+        (st) => st,
         (err: unknown) => {
-          if (statusOf(err) === STATUS_NO_SUCH_FILE) return false
+          if (statusOf(err) === STATUS_NO_SUCH_FILE) return null
           throw err
         }
       )
-      if (taken) {
+      if (taken && (!overwrite || typeOf(taken.mode) === 'dir')) {
+        // SFTP servers differ on whether rename replaces the target; never rely on it by accident.
         throw new FsError({ code: 'EEXIST', path: to, message: `"${baseName(to)}" already exists` })
       }
-      await callVoid((cb) => sftp.rename(from, to, cb))
+      if (taken) await this.replace(sftp, from, to)
+      else await callVoid((cb) => sftp.rename(from, to, cb))
     } catch (err) {
       throw await this.translate(sftp, err, from)
+    }
+  }
+
+  async openRead(path: string, { start = 0 }: { start?: number } = {}): Promise<Readable> {
+    const sftp = await this.source.sftp('transfer')
+    try {
+      const handle = await call<Buffer>((cb) => sftp.open(path, 'r', cb))
+      try {
+        const { size } = await call<Stats>((cb) => sftp.fstat(handle, cb))
+        return new SftpReadStream(sftp, handle, size, start)
+      } catch (err) {
+        sftp.close(handle, () => {})
+        throw err
+      }
+    } catch (err) {
+      throw await this.translate(sftp, err, path)
+    }
+  }
+
+  async openWrite(
+    path: string,
+    { mode = 0o666, exclusive = false }: { mode?: number; exclusive?: boolean } = {}
+  ): Promise<Writable> {
+    const sftp = await this.source.sftp('transfer')
+    try {
+      const handle = await call<Buffer>((cb) =>
+        sftp.open(path, exclusive ? 'wx' : 'w', { mode }, cb)
+      )
+      return new SftpWriteStream(sftp, handle)
+    } catch (err) {
+      throw await this.translate(sftp, err, path, 'create')
+    }
+  }
+
+  async setTimes(path: string, mtimeMs: number): Promise<void> {
+    const sftp = await this.source.sftp()
+    try {
+      const { atime } = await this.lstat(sftp, path)
+      await callVoid((cb) => sftp.utimes(path, atime, mtimeMs / 1000, cb))
+    } catch (err) {
+      throw await this.translate(sftp, err, path)
+    }
+  }
+
+  async symlink(target: string, path: string): Promise<void> {
+    const sftp = await this.source.sftp()
+    try {
+      await callVoid((cb) => sftp.symlink(target, path, cb))
+    } catch (err) {
+      throw await this.translate(sftp, err, path, 'create')
     }
   }
 
@@ -228,6 +285,25 @@ export class SftpProvider implements FileSystemProvider {
       entry.linkTargetType = 'broken'
     }
     return entry
+  }
+
+  /** Replace an existing file: atomically where the server supports POSIX rename, else delete first. */
+  private async replace(sftp: SFTPWrapper, from: string, to: string): Promise<void> {
+    try {
+      await callVoid((cb) => sftp.ext_openssh_rename(from, to, cb))
+      return
+    } catch (err) {
+      // A real failure (missing source) must surface; "extension not available" falls through.
+      if (statusOf(err) === STATUS_NO_SUCH_FILE) throw err
+      if (
+        statusOf(err) !== STATUS_OP_UNSUPPORTED &&
+        !/support|extension/i.test(String((err as Error)?.message))
+      ) {
+        throw err
+      }
+    }
+    await callVoid((cb) => sftp.unlink(to, cb))
+    await callVoid((cb) => sftp.rename(from, to, cb))
   }
 
   private async rmdir(sftp: SFTPWrapper, path: string): Promise<void> {

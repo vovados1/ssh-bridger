@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef, type MouseEvent } from 'react'
+import { memo, useEffect, useRef, useState, type DragEvent, type MouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { isDirLike, type Entry } from '@shared/fs-types'
 import { useColumn, useColumnStore } from './ColumnContext'
 import { formatDate, formatMode, formatSize } from './format'
 import { EntryIcon } from './icons'
 import { RenameInput } from './RenameInput'
+import type { ColumnDnd } from './useColumnDnd'
 import type { SortKey } from './sort'
 import styles from './FileList.module.css'
 
@@ -23,6 +24,15 @@ interface RowProps {
   selected: boolean
   cursor: boolean
   renaming: boolean
+  /** Cut and waiting to be pasted. */
+  cut: boolean
+  /** A drag is hovering over this folder and would drop into it. */
+  dropTarget: boolean
+  onDragStart(e: DragEvent, entry: Entry): void
+  onDragEnd(): void
+  onDragOverFolder(e: DragEvent, entry: Entry): void
+  onDragLeaveFolder(e: DragEvent, entry: Entry): void
+  onDropOnFolder(e: DragEvent, entry: Entry): void
   onClick(e: MouseEvent, entry: Entry): void
   onOpen(entry: Entry): void
   onContextMenu(e: MouseEvent, entry: Entry): void
@@ -36,12 +46,20 @@ const Row = memo(function Row({
   selected,
   cursor,
   renaming,
+  cut,
+  dropTarget,
+  onDragStart,
+  onDragEnd,
+  onDragOverFolder,
+  onDragLeaveFolder,
+  onDropOnFolder,
   onClick,
   onOpen,
   onContextMenu,
   onRenameCommit,
   onRenameCancel
 }: RowProps) {
+  const dir = isDirLike(entry)
   const broken = entry.type === 'symlink' && entry.linkTargetType === 'broken'
   return (
     <div
@@ -51,8 +69,16 @@ const Row = memo(function Row({
       className={styles.row}
       data-selected={selected}
       data-cursor={cursor}
-      data-dir={isDirLike(entry)}
+      data-dir={dir}
       data-broken={broken}
+      data-cut={cut}
+      data-drop={dropTarget}
+      draggable={!renaming}
+      onDragStart={(e) => onDragStart(e, entry)}
+      onDragEnd={onDragEnd}
+      onDragOver={dir ? (e) => onDragOverFolder(e, entry) : undefined}
+      onDragLeave={dir ? (e) => onDragLeaveFolder(e, entry) : undefined}
+      onDrop={dir ? (e) => onDropOnFolder(e, entry) : undefined}
       style={{ height: ROW_HEIGHT, transform: `translateY(${top}px)` }}
       onClick={(e) => onClick(e, entry)}
       onDoubleClick={() => onOpen(entry)}
@@ -103,9 +129,12 @@ interface FileListProps {
   pageSizeRef: { current: number }
   /** Right-click on a row (`entry`) or on empty space (`null`). */
   onContextMenu(e: MouseEvent, entry: Entry | null): void
+  dnd: ColumnDnd
+  /** Paths waiting to be pasted after a cut. */
+  cutPaths: ReadonlySet<string>
 }
 
-export function FileList({ pageSizeRef, onContextMenu }: FileListProps) {
+export function FileList({ pageSizeRef, onContextMenu, dnd, cutPaths }: FileListProps) {
   const store = useColumnStore()
   const visible = useColumn((s) => s.visible)
   const selected = useColumn((s) => s.selected)
@@ -156,6 +185,24 @@ export function FileList({ pageSizeRef, onContextMenu }: FileListProps) {
   const onRenameCommit = (name: string) => store.getState().commitRename(name)
   const onRenameCancel = () => store.getState().cancelRename()
 
+  // Drag and drop: `dropOn` is the folder row (by path) or `'cwd'` for the empty area, while hovering.
+  const [dropOn, setDropOn] = useState<string | null>(null)
+  const onDragOverFolder = (e: DragEvent, entry: Entry) => {
+    if (dnd.onDragOver(e, entry.path)) {
+      e.stopPropagation() // a folder row wins over the list behind it
+      setDropOn(entry.path)
+    }
+  }
+  const onDragLeaveFolder = (e: DragEvent, entry: Entry) => {
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) {
+      setDropOn((cur) => (cur === entry.path ? null : cur))
+    }
+  }
+  const onDropOnFolder = (e: DragEvent, entry: Entry) => {
+    setDropOn(null)
+    dnd.onDrop(e, entry.path)
+  }
+
   return (
     <div
       ref={scrollRef}
@@ -168,6 +215,18 @@ export function FileList({ pageSizeRef, onContextMenu }: FileListProps) {
         if (e.target === e.currentTarget) store.getState().clearSelection()
       }}
       onContextMenu={(e) => onContextMenu(e, null)}
+      data-drop={dropOn === 'cwd'}
+      onDragOver={(e) => {
+        if (cwd !== null && dnd.onDragOver(e, cwd)) setDropOn('cwd')
+        else setDropOn(null)
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropOn(null)
+      }}
+      onDrop={(e) => {
+        setDropOn(null)
+        if (cwd !== null) dnd.onDrop(e, cwd)
+      }}
     >
       <div className={styles.header} role="presentation">
         {HEADERS.map((h) => (
@@ -195,6 +254,13 @@ export function FileList({ pageSizeRef, onContextMenu }: FileListProps) {
               selected={selected.has(entry.path)}
               cursor={cursor === entry.path}
               renaming={renaming === entry.path}
+              cut={cutPaths.has(entry.path)}
+              dropTarget={dropOn === entry.path}
+              onDragStart={dnd.onDragStart}
+              onDragEnd={dnd.onDragEnd}
+              onDragOverFolder={onDragOverFolder}
+              onDragLeaveFolder={onDragLeaveFolder}
+              onDropOnFolder={onDropOnFolder}
               onClick={onClick}
               onOpen={onOpen}
               onContextMenu={onContextMenu}

@@ -37,6 +37,10 @@ export interface ColumnState {
   /** Path of the entry whose name is being edited inline. */
   renaming: string | null
 
+  /**
+   * Open the starting folder. Safe to call again (e.g. after a reconnect): a column that
+   * already shows something just resumes watching it and reloads.
+   */
   init(): Promise<void>
   /** Go to a typed or clicked path. `~` and relative paths are resolved. */
   navigate(input: string): Promise<boolean>
@@ -74,10 +78,20 @@ export interface ColumnState {
   details(path: string): Promise<EntryDetails>
 }
 
+/** Where a column starts, restored from the saved layout. */
+export interface ColumnInitial {
+  /** Folder to open instead of home; quietly falls back to home if it is gone. */
+  path?: string
+  showHidden?: boolean
+  sortKey?: SortKey
+  sortDir?: SortDir
+}
+
 export interface ColumnStoreOptions {
   machineId: MachineId
   fs: FsClient
   notify: Notify
+  initial?: ColumnInitial
   /** Names this column's watch so main can tell columns apart. */
   watchKey?: string
 }
@@ -96,6 +110,7 @@ export function createColumnStore({
   machineId,
   fs,
   notify,
+  initial = {},
   watchKey = 'column'
 }: ColumnStoreOptions): ColumnStore {
   /** Only the latest listing request may apply its result; older ones are stale. */
@@ -213,9 +228,9 @@ export function createColumnStore({
       visible: [],
       loading: false,
       error: null,
-      showHidden: false,
-      sortKey: 'name',
-      sortDir: 'asc',
+      showHidden: initial.showHidden ?? false,
+      sortKey: initial.sortKey ?? 'name',
+      sortDir: initial.sortDir ?? 'asc',
       selected: new Set(),
       cursor: null,
       anchor: null,
@@ -226,12 +241,25 @@ export function createColumnStore({
         unsubscribe = fs.onChanged((key) => {
           if (key === watchKey) void get().refresh()
         })
+        const showing = get().cwd
+        if (showing !== null) {
+          // Resuming (the connection came back): watch the folder again and show what is there now.
+          void fs.watch(machineId, showing, watchKey).catch(() => {})
+          await get().refresh()
+          return
+        }
         const startedAt = requestSeq
         try {
           const home = await fs.home(machineId)
           set({ home })
           // On a slow machine the user can navigate before home resolves; their choice wins.
           if (requestSeq !== startedAt) return
+          const wanted = initial.path
+          if (wanted !== undefined && wanted !== home) {
+            if (await load(wanted, 'push')) return
+            if (requestSeq !== startedAt + 1) return // the user went somewhere else meanwhile
+            set({ error: null }) // the saved folder is gone: fall back to home without complaint
+          }
           await load(home, 'push')
         } catch (err) {
           set({ error: errorData(err) })
