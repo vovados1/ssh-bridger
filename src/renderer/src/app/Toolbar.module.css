@@ -1,0 +1,37 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 8px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.connect,
+.plain {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.connect:hover:not(:disabled),
+.plain:hover {
+  background: var(--bg-hover);
+}
+
+.connect:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.note {
+  color: var(--muted);
+}
+
+.spacer {
+  flex: 1;
+}

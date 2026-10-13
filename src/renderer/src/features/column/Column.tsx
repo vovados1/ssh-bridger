@@ -7,12 +7,14 @@ import {
   type MouseEvent
 } from 'react'
 import { isDirLike, type Entry, type MachineId } from '@shared/fs-types'
+import type { ConnectionState } from '@shared/connections'
+import { StatusDot } from '../../components/StatusDot'
 import type { FsClient } from '../../lib/fs-client'
 import { copyText } from '../../lib/api'
 import type { Notify } from '../../lib/toasts'
 import { ColumnContext, useColumn, useColumnStore } from './ColumnContext'
 import { createColumnStore } from './columnStore'
-import { ContextMenu, type MenuItem } from './ContextMenu'
+import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { ConfirmDeleteDialog } from './dialogs/ConfirmDeleteDialog'
 import { PermissionsDialog } from './dialogs/PermissionsDialog'
 import { PropertiesDialog } from './dialogs/PropertiesDialog'
@@ -20,14 +22,30 @@ import { FileList, rowId } from './FileList'
 import { PathBar, type PathBarHandle } from './PathBar'
 import styles from './Column.module.css'
 
-interface ColumnProps {
+export interface ColumnProps {
   machineId: MachineId
   title: string
   fs: FsClient
   notify: Notify
+  /** Only the local machine has a Trash; deleting elsewhere is permanent and always asks first. */
+  canTrash?: boolean
+  /** Accent color for the header. */
+  color?: string
+  /** Remote columns: the connection this column lives on. */
+  connection?: { state: ConnectionState | undefined; reconnect(): void }
+  onClose?: () => void
 }
 
-export function Column({ machineId, title, fs, notify }: ColumnProps) {
+export function Column({
+  machineId,
+  title,
+  fs,
+  notify,
+  canTrash = true,
+  color,
+  connection,
+  onClose
+}: ColumnProps) {
   const [store] = useState(() =>
     createColumnStore({ machineId, fs, notify, watchKey: crypto.randomUUID() })
   )
@@ -39,7 +57,14 @@ export function Column({ machineId, title, fs, notify }: ColumnProps) {
 
   return (
     <ColumnContext.Provider value={store}>
-      <ColumnView title={title} notify={notify} />
+      <ColumnView
+        title={title}
+        notify={notify}
+        canTrash={canTrash}
+        color={color}
+        connection={connection}
+        onClose={onClose}
+      />
     </ColumnContext.Provider>
   )
 }
@@ -50,7 +75,21 @@ type Overlay =
   | { kind: 'permissions'; entries: Entry[] }
   | { kind: 'properties'; paths: string[]; entries: Entry[] }
 
-function ColumnView({ title, notify }: { title: string; notify: Notify }) {
+function ColumnView({
+  title,
+  notify,
+  canTrash,
+  color,
+  connection,
+  onClose
+}: {
+  title: string
+  notify: Notify
+  canTrash: boolean
+  color: string | undefined
+  connection: ColumnProps['connection']
+  onClose: (() => void) | undefined
+}) {
   const store = useColumnStore()
   const pathBar = useRef<PathBarHandle | null>(null)
   const pageSize = useRef(10)
@@ -61,6 +100,20 @@ function ColumnView({ title, notify }: { title: string; notify: Notify }) {
   const count = useColumn((s) => s.visible.length)
   const selectedCount = useColumn((s) => s.selected.size)
   const renaming = useColumn((s) => s.renaming)
+
+  // After the connection comes back, show what is on the server now.
+  const status = connection?.state?.status
+  const lastStatus = useRef(status)
+  useEffect(() => {
+    if (
+      lastStatus.current !== undefined &&
+      lastStatus.current !== 'connected' &&
+      status === 'connected'
+    ) {
+      void store.getState().refresh()
+    }
+    lastStatus.current = status
+  }, [status, store])
 
   // Menus, dialogs and the rename field all leave focus on <body> when they go away; hand it
   // back to the list so shortcuts keep working. (Focusing earlier fails: a modal dialog makes
@@ -77,6 +130,8 @@ function ColumnView({ title, notify }: { title: string; notify: Notify }) {
   // ---- actions shared by the keyboard and the context menu ----------------------------------
 
   const trash = () => {
+    // No Trash here: Delete means delete, so confirm like Shift+Delete does.
+    if (!canTrash) return deletePermanently()
     const targets = store.getState().selectedEntries()
     if (targets.length > 0)
       void store.getState().remove(
@@ -144,14 +199,18 @@ function ColumnView({ title, notify }: { title: string; notify: Notify }) {
       },
       { separator: true },
       { label: 'Rename', shortcut: 'F2', disabled: !one, onSelect: () => s.startRename(one?.path) },
+      ...(canTrash
+        ? [
+            {
+              label: items ? `Move ${items} to Trash` : 'Move to Trash',
+              shortcut: 'Del',
+              onSelect: trash
+            } satisfies MenuItem
+          ]
+        : []),
       {
-        label: items ? `Move ${items} to Trash` : 'Move to Trash',
-        shortcut: 'Del',
-        onSelect: trash
-      },
-      {
-        label: items ? `Delete ${items} Permanently…` : 'Delete Permanently…',
-        shortcut: 'Shift+Del',
+        label: items ? `Delete ${items}…` : 'Delete…',
+        shortcut: canTrash ? 'Shift+Del' : 'Del',
         danger: true,
         onSelect: deletePermanently
       },
@@ -275,7 +334,28 @@ function ColumnView({ title, notify }: { title: string; notify: Notify }) {
       onKeyDown={onKeyDown}
       aria-label={title}
     >
-      <header className={styles.title}>{title}</header>
+      <header
+        className={styles.title}
+        style={color ? { boxShadow: `inset 0 3px 0 ${color}` } : undefined}
+      >
+        {connection && <StatusDot status={connection.state?.status} />}
+        <span className={styles.titleText}>{title}</span>
+        {onClose && (
+          <button
+            className={styles.close}
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+            title="Close column"
+          >
+            ×
+          </button>
+        )}
+      </header>
+      {connection &&
+        connection.state?.status !== 'connected' &&
+        connection.state?.status !== 'connecting' && (
+          <ConnectionBanner state={connection.state} onReconnect={connection.reconnect} />
+        )}
       <PathBar handleRef={pathBar} />
       {error && (
         <div className={styles.error} role="alert">
@@ -297,6 +377,7 @@ function ColumnView({ title, notify }: { title: string; notify: Notify }) {
       {overlay?.kind === 'confirmDelete' && (
         <ConfirmDeleteDialog
           names={overlay.entries.map((e) => e.name)}
+          {...(canTrash ? {} : { machineName: title })}
           onConfirm={() =>
             void store.getState().remove(
               overlay.entries.map((e) => e.path),
@@ -327,5 +408,25 @@ function ColumnView({ title, notify }: { title: string; notify: Notify }) {
         />
       )}
     </section>
+  )
+}
+
+function ConnectionBanner({
+  state,
+  onReconnect
+}: {
+  state: ConnectionState | undefined
+  onReconnect(): void
+}) {
+  const reconnecting = state?.status === 'reconnecting'
+  return (
+    <div className={styles.banner} role="status">
+      <span>
+        {reconnecting
+          ? `Connection lost. Reconnecting${state?.attempt ? ` (attempt ${state.attempt})` : ''}…`
+          : `Disconnected${state?.error ? `: ${state.error}` : ''}`}
+      </span>
+      {!reconnecting && <button onClick={onReconnect}>Reconnect</button>}
+    </div>
   )
 }

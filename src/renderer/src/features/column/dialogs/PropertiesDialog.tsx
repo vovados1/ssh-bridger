@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Entry, EntryDetails } from '@shared/fs-types'
 import { parentOf } from '@shared/posix-path'
-import { Dialog } from '../Dialog'
+import { Dialog } from '../../../components/Dialog'
 import { describeType, formatDateTime, formatMode, formatSize } from '../format'
 import { modeToOctal } from '../mode'
 import styles from './dialogs.module.css'

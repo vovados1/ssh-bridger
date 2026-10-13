@@ -10,6 +10,14 @@ export class MachineRegistry {
     this.providers.set(provider.id, provider)
   }
 
+  unregister(id: MachineId): void {
+    this.providers.delete(id)
+  }
+
+  has(id: MachineId): boolean {
+    return this.providers.has(id)
+  }
+
   get(id: MachineId): FileSystemProvider {
     const provider = this.providers.get(id)
     if (!provider) {

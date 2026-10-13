@@ -6,6 +6,14 @@ import {
   MachineIdSchema,
   ModeSchema
 } from './fs-schemas'
+import {
+  ConnectionProfileInputSchema,
+  ConnectionProfileSchema,
+  ConnectionStateSchema,
+  PromptResponseSchema,
+  SshConfigCandidateSchema
+} from './connection-schemas'
+import type { ConnectionState, PromptRequest } from './connections'
 import type { FsErrorData } from './fs-types'
 
 const onMachine = z.object({ machineId: MachineIdSchema })
@@ -41,15 +49,48 @@ export const ipcContract = {
   'fs:watch': { request: onPath.extend({ key: WatchKeySchema }), response: z.boolean() },
   'fs:unwatch': { request: z.object({ key: WatchKeySchema }), response: done },
   /** Put text on the system clipboard. Done in main: the web clipboard API needs window focus. */
-  'app:copyText': { request: z.object({ text: z.string().max(1_000_000) }), response: done }
+  'app:copyText': { request: z.object({ text: z.string().max(1_000_000) }), response: done },
+  'app:capabilities': {
+    request: z.void(),
+    /** `secureStorage`: the OS keyring is usable, so passwords may be remembered. */
+    response: z.object({ secureStorage: z.boolean() })
+  },
+  /** Native file picker for choosing a private key. Null when cancelled. */
+  'app:pickFile': {
+    request: z.object({ title: z.string().max(200), startIn: z.string().max(4096).optional() }),
+    response: z.string().nullable()
+  },
+
+  'profiles:list': { request: z.void(), response: z.array(ConnectionProfileSchema) },
+  'profiles:save': { request: ConnectionProfileInputSchema, response: ConnectionProfileSchema },
+  /** Refused while another profile uses this one as its jump host. */
+  'profiles:delete': { request: z.object({ id: z.string().min(1) }), response: done },
+  'sshconfig:list': { request: z.void(), response: z.array(SshConfigCandidateSchema) },
+  'sshconfig:import': {
+    request: z.object({ aliases: z.array(z.string().min(1).max(255)).min(1).max(500) }),
+    response: z.array(ConnectionProfileSchema)
+  },
+
+  /** Resolves once connected; rejects with EAUTH / ECONNECT / EHOSTKEY / ECANCELLED otherwise. */
+  'conn:connect': { request: z.object({ profileId: z.string().min(1) }), response: done },
+  'conn:disconnect': { request: z.object({ profileId: z.string().min(1) }), response: done },
+  'conn:states': { request: z.void(), response: z.array(ConnectionStateSchema) },
+  /** Answer a prompt raised by `conn:prompt`; null means the user cancelled. */
+  'conn:respond': {
+    request: z.object({ id: z.string().min(1), response: PromptResponseSchema.nullable() }),
+    response: done
+  }
 } as const
 
 /** Messages main pushes to the renderer. */
-export const ipcEvents = {
+export interface IpcEvents {
   /** The watched folder for `key` changed on disk. */
-  'fs:changed': z.object({ key: WatchKeySchema })
-} as const
-export type IpcEvents = { [E in keyof typeof ipcEvents]: z.output<(typeof ipcEvents)[E]> }
+  'fs:changed': { key: string }
+  'conn:state': ConnectionState
+  'conn:prompt': PromptRequest
+  /** A prompt is no longer needed (the connection attempt ended). */
+  'conn:promptCancel': { id: string }
+}
 
 export type IpcContract = typeof ipcContract
 export type IpcChannel = keyof IpcContract
@@ -82,9 +123,26 @@ export interface BridgerApi {
   }
   app: {
     copyText: Call<'app:copyText'>
+    capabilities: Call<'app:capabilities'>
+    pickFile: Call<'app:pickFile'>
+  }
+  profiles: {
+    list: Call<'profiles:list'>
+    save: Call<'profiles:save'>
+    delete: Call<'profiles:delete'>
+  }
+  sshConfig: {
+    list: Call<'sshconfig:list'>
+    import: Call<'sshconfig:import'>
+  }
+  conn: {
+    connect: Call<'conn:connect'>
+    disconnect: Call<'conn:disconnect'>
+    states: Call<'conn:states'>
+    respond: Call<'conn:respond'>
   }
   events: {
-    /** Subscribe to watched-folder changes. Returns an unsubscribe function. */
-    onFsChanged(listener: (event: IpcEvents['fs:changed']) => void): () => void
+    /** Subscribe to a main-to-renderer message. Returns an unsubscribe function. */
+    on<E extends keyof IpcEvents>(event: E, listener: (payload: IpcEvents[E]) => void): () => void
   }
 }

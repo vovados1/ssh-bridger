@@ -1,12 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import type {
-  BridgerApi,
-  IpcChannel,
-  IpcEvents,
-  IpcRequest,
-  IpcResponse,
-  IpcResult
-} from '@shared/ipc'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { BridgerApi, IpcChannel, IpcRequest, IpcResponse, IpcResult } from '@shared/ipc'
 
 function invoke<C extends IpcChannel>(
   channel: C,
@@ -31,15 +24,33 @@ const api: BridgerApi = {
     unwatch: (req) => invoke('fs:unwatch', req)
   },
   app: {
-    copyText: (req) => invoke('app:copyText', req)
+    copyText: (req) => invoke('app:copyText', req),
+    capabilities: () => invoke('app:capabilities', undefined),
+    pickFile: (req) => invoke('app:pickFile', req)
+  },
+  profiles: {
+    list: () => invoke('profiles:list', undefined),
+    save: (req) => invoke('profiles:save', req),
+    delete: (req) => invoke('profiles:delete', req)
+  },
+  sshConfig: {
+    list: () => invoke('sshconfig:list', undefined),
+    import: (req) => invoke('sshconfig:import', req)
+  },
+  conn: {
+    connect: (req) => invoke('conn:connect', req),
+    disconnect: (req) => invoke('conn:disconnect', req),
+    states: () => invoke('conn:states', undefined),
+    respond: (req) => invoke('conn:respond', req)
   },
   events: {
-    onFsChanged(listener) {
+    on(event, listener) {
       // Wrap so the renderer never receives Electron's IpcRendererEvent.
-      const wrapped = (_event: unknown, payload: IpcEvents['fs:changed']): void => listener(payload)
-      ipcRenderer.on('fs:changed', wrapped)
+      const wrapped = (_event: IpcRendererEvent, payload: Parameters<typeof listener>[0]): void =>
+        listener(payload)
+      ipcRenderer.on(event, wrapped)
       return () => {
-        ipcRenderer.removeListener('fs:changed', wrapped)
+        ipcRenderer.removeListener(event, wrapped)
       }
     }
   }

@@ -112,6 +112,21 @@ describe('navigation', () => {
   })
 })
 
+describe('init', () => {
+  it('does not override a navigation the user started while home was still resolving', async () => {
+    const fs = fakeFs(tree())
+    let release!: (home: string) => void
+    fs.home = () => new Promise((resolve) => (release = resolve))
+    const store = createColumnStore({ machineId: 'local', fs, notify: () => {} })
+    const init = store.getState().init()
+    await store.getState().navigate('/home/me/src') // typed before the home folder was known
+    release('/home/me')
+    await init
+    expect(store.getState().cwd).toBe('/home/me/src')
+    expect(store.getState().home).toBe('/home/me') // still learned, for ~ expansion
+  })
+})
+
 describe('refresh', () => {
   it('reloads and keeps the selection that still exists', async () => {
     const t = tree()
