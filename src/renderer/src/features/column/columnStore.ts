@@ -226,9 +226,12 @@ export function createColumnStore({
         unsubscribe = fs.onChanged((key) => {
           if (key === watchKey) void get().refresh()
         })
+        const startedAt = requestSeq
         try {
           const home = await fs.home(machineId)
           set({ home })
+          // On a slow machine the user can navigate before home resolves; their choice wins.
+          if (requestSeq !== startedAt) return
           await load(home, 'push')
         } catch (err) {
           set({ error: errorData(err) })

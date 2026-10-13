@@ -12,6 +12,8 @@
   --error-bg: #fde8e8;
   --error-fg: #b42318;
   --folder: #3b82f6;
+  --ok: #1a9d4b;
+  --warn: #d98a00;
   --font: system-ui, 'Segoe UI', sans-serif;
   --mono: ui-monospace, 'JetBrains Mono', 'SF Mono', monospace;
 }
@@ -30,6 +32,8 @@
     --error-bg: #46201f;
     --error-fg: #ffb4ab;
     --folder: #6ea0ff;
+    --ok: #3ddc84;
+    --warn: #ffb020;
   }
 }
 
@@ -54,4 +58,9 @@ body {
 button {
   font: inherit;
   color: inherit;
+}
+
+input,
+select {
+  font: inherit;
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Entry } from '@shared/fs-types'
-import { Dialog } from '../Dialog'
+import { Dialog } from '../../../components/Dialog'
 import { hasBit, modeToOctal, parseOctal, toggleBit, type ModeBit } from '../mode'
 import styles from './dialogs.module.css'
 

@@ -43,6 +43,14 @@ export const FS_ERROR_CODES = [
   'ENOTDIR',
   'EISDIR',
   'EDISCONNECTED',
+  /** Authentication was refused (wrong password, no usable key, ...). */
+  'EAUTH',
+  /** The host could not be reached (refused, unknown host, timeout). */
+  'ECONNECT',
+  /** The host's key is not trusted: it changed, was revoked, or the user declined it. */
+  'EHOSTKEY',
+  /** The user cancelled a prompt or the connection attempt. */
+  'ECANCELLED',
   'EUNKNOWN'
 ] as const
 export type FsErrorCode = (typeof FS_ERROR_CODES)[number]

@@ -47,13 +47,19 @@ app.on('web-contents-created', (_event, contents) => {
   contents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
 })
 
-void app.whenReady().then(() => {
-  registerIpcHandlers()
+let shutdownConnections: () => Promise<void> = async () => {}
+
+void app.whenReady().then(async () => {
+  shutdownConnections = await registerIpcHandlers()
   createWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  void shutdownConnections()
 })
 
 app.on('window-all-closed', () => {

@@ -1,0 +1,29 @@
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.dot[data-status='connected'] {
+  background: var(--ok);
+}
+
+.dot[data-status='connecting'],
+.dot[data-status='reconnecting'] {
+  background: var(--warn);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.dot[data-status='error'],
+.dot[data-status='disconnected'] {
+  background: var(--error-fg);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}

@@ -273,7 +273,7 @@ Each milestone ends with something runnable.
 - Auth: agent, key with passphrase, password, keyboard-interactive. known_hosts verification and TOFU dialog.
 - `SftpProvider` with the same operations as local (recursive delete via walk).
 - Shared connection per profile, status dot, keepalive, reconnect.
-- Docker sshd fixture. The provider contract test suite runs against **both** providers.
+- Test fixture: a real OpenSSH `sshd` started per test file as the current user on a random port (no Docker needed), plus an in-process ssh2 server for password and keyboard-interactive flows. The provider contract suite runs against **both** providers.
 
 **M4: Multi-column + transfers**
 
@@ -291,11 +291,11 @@ Each milestone ends with something runnable.
 ## 7. Testing strategy
 
 - **Provider contract tests**: one Vitest suite parameterized over `LocalProvider` (tmp dir) and
-  `SftpProvider` (Docker OpenSSH container with key auth). Any behavior difference is a bug.
+  `SftpProvider` (a real `sshd` started by the tests). Any behavior difference is a bug.
 - **Transfer tests**: every source/target pair (L→R, R→L, R→R, L→L), with nested dirs, empty dirs,
   symlinks, 0-byte and >1 GB files, cancel mid-file (no `.part` left behind), each conflict policy, and move rollback on failure.
 - **SSH tests**: unknown host, changed host key (must refuse), encrypted key, wrong password,
-  keyboard-interactive, jump host (second container), connection drop during a transfer.
+  keyboard-interactive, jump host (a second `sshd`), connection drop during a transfer.
 - **E2E (Playwright `_electron`)**: open the app, connect to the fixture, drag a file from local to
   remote, assert it arrives.
 

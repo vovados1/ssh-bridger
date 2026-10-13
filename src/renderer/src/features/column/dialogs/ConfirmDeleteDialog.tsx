@@ -1,15 +1,17 @@
-import { Dialog } from '../Dialog'
+import { Dialog } from '../../../components/Dialog'
 
 const SHOWN = 5
 
 interface Props {
   names: string[]
+  /** Set for machines without a Trash, so the text says where the files will be deleted. */
+  machineName?: string
   onConfirm(): void
   onClose(): void
 }
 
 /** Permanent deletion is the only delete that asks; Trash is undoable. */
-export function ConfirmDeleteDialog({ names, onConfirm, onClose }: Props) {
+export function ConfirmDeleteDialog({ names, machineName, onConfirm, onClose }: Props) {
   const many = names.length > 1
   return (
     <Dialog
@@ -34,7 +36,8 @@ export function ConfirmDeleteDialog({ names, onConfirm, onClose }: Props) {
       }
     >
       <p style={{ margin: '0 0 8px' }}>
-        {many ? 'These items' : 'This item'} will be deleted immediately and cannot be recovered.
+        {many ? 'These items' : 'This item'} will be deleted
+        {machineName ? ` from ${machineName}` : ''} immediately and cannot be recovered.
       </p>
       <ul style={{ margin: 0, paddingLeft: 20 }}>
         {names.slice(0, SHOWN).map((n) => (
