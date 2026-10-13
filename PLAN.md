@@ -37,7 +37,7 @@ any two of them.
 | Styling         | CSS Modules + CSS variables (light/dark)                 | No runtime cost. Easy to theme                                                                                              |
 | SSH/SFTP        | `ssh2`                                                   | Pure JS, mature, supports agent/keys/password/keyboard-interactive, multiple SFTP channels, and jump hosts via `forwardOut` |
 | SSH config      | `ssh-config`                                             | Parse `~/.ssh/config` for host aliases                                                                                      |
-| Local watch     | `@parcel/watcher`                                        | Native, efficient, recursive-safe                                                                                           |
+| Local watch     | `fs.watch` (non-recursive inotify)                       | We only watch the folders on screen. A recursive watcher over `$HOME` would burn inotify watches for no benefit             |
 | Secrets         | Electron `safeStorage`                                   | Backed by libsecret/KWallet on Linux                                                                                        |
 | Tests           | Vitest (unit/integration), Playwright for Electron (e2e) | —                                                                                                                           |
 | Packaging       | `electron-builder` → AppImage, `.deb`, `pacman`          | Covers the main distros, including Arch                                                                                     |
@@ -56,7 +56,7 @@ any two of them.
 ┌──────────────┴──────────────── Main process ────────────────▼────────────────┐
 │  IPC router (zod-validated)                                                  │
 │  MachineRegistry ── machineId → FileSystemProvider                           │
-│     ├─ LocalProvider   (node:fs/promises, @parcel/watcher, shell.trashItem)  │
+│     ├─ LocalProvider   (node:fs/promises, fs.watch, shell.trashItem)  │
 │     └─ SftpProvider    (ssh2 Client → SFTP channels)                         │
 │  ConnectionManager  (profiles, auth, known_hosts, keepalive, reconnect)      │
 │  TransferManager    (queue, workers, progress, conflicts, cancel)            │

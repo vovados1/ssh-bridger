@@ -1,40 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { FsError, type Entry } from '@shared/fs-types'
 import { createColumnStore } from '../../src/renderer/src/features/column/columnStore'
-import type { FsClient } from '../../src/renderer/src/lib/fs-client'
-
-const file = (dir: string, name: string, over: Partial<Entry> = {}): Entry => ({
-  name,
-  path: dir === '/' ? `/${name}` : `${dir}/${name}`,
-  type: 'file',
-  size: 1,
-  mtime: 1,
-  mode: 0o644,
-  ...over
-})
-const folder = (dir: string, name: string) => file(dir, name, { type: 'dir' })
-
-type Tree = Record<string, Entry[]>
-
-function fakeFs(
-  tree: Tree,
-  delays: Record<string, Promise<void>> = {}
-): FsClient & { calls: string[] } {
-  const calls: string[] = []
-  return {
-    calls,
-    home: async () => '/home/me',
-    realpath: async (_m, p) => p,
-    stat: async (_m, p) => file('/', p),
-    list: async (_m, path) => {
-      calls.push(path)
-      await delays[path]
-      const entries = tree[path]
-      if (!entries) throw new FsError({ code: 'ENOENT', path, message: `"${path}" does not exist` })
-      return entries
-    }
-  }
-}
+import { fakeFs, file, folder, type Tree } from './fake-fs'
 
 const tree = (): Tree => ({
   '/': [folder('/', 'home'), folder('/', 'etc')],
@@ -52,7 +18,7 @@ const tree = (): Tree => ({
 })
 
 async function started(fs = fakeFs(tree())) {
-  const store = createColumnStore({ machineId: 'local', fs })
+  const store = createColumnStore({ machineId: 'local', fs, notify: () => {} })
   await store.getState().init()
   return { store, fs, s: () => store.getState() }
 }

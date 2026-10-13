@@ -1,5 +1,5 @@
 import { FsError, type MachineId } from '@shared/fs-types'
-import { LocalProvider } from './local-provider'
+import { LocalProvider, type LocalProviderOptions } from './local-provider'
 import type { FileSystemProvider } from './provider'
 
 /** Maps a machine id to its provider. SSH providers register here from M3. */
@@ -19,8 +19,8 @@ export class MachineRegistry {
   }
 }
 
-export function createRegistry(): MachineRegistry {
+export function createRegistry(local: LocalProviderOptions = {}): MachineRegistry {
   const registry = new MachineRegistry()
-  registry.register(new LocalProvider())
+  registry.register(new LocalProvider(local))
   return registry
 }

@@ -1,0 +1,61 @@
+.dialog {
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.4);
+}
+
+.dialog::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+
+.title {
+  margin: 0;
+  padding: 16px 20px 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.body {
+  padding: 4px 20px 12px;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}
+
+.footer button {
+  min-width: 80px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.footer button:hover {
+  background: var(--bg-hover);
+}
+
+.footer button[data-primary='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.footer button[data-danger='true'] {
+  border-color: var(--error-fg);
+  background: var(--error-fg);
+  color: #fff;
+}
+
+.footer button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
