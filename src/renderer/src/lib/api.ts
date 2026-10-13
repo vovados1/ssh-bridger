@@ -1,5 +1,6 @@
 import { unwrap, type FsClient } from './fs-client'
 import type { ConnectionsClient } from './connections-client'
+import type { TransfersClient } from './transfers-client'
 
 /** The real FsClient, backed by the preload bridge. Renderer code should not touch `window.api`. */
 export const fsClient: FsClient = {
@@ -38,4 +39,20 @@ export const connectionsClient: ConnectionsClient = {
   onState: (listener) => window.api.events.on('conn:state', listener),
   onPrompt: (listener) => window.api.events.on('conn:prompt', listener),
   onPromptCancel: (listener) => window.api.events.on('conn:promptCancel', (e) => listener(e.id))
+}
+
+export const transfersClient: TransfersClient = {
+  start: async (request) => (await unwrap(window.api.transfer.start(request))).jobId,
+  cancel: (jobId) => unwrap(window.api.transfer.cancel({ jobId })),
+  resolve: (conflictId, answer) => unwrap(window.api.transfer.resolve({ conflictId, ...answer })),
+  retry: async (jobId) => (await unwrap(window.api.transfer.retry({ jobId }))).jobId,
+  clear: (jobId) => unwrap(window.api.transfer.clear(jobId ? { jobId } : {})),
+  list: () => unwrap(window.api.transfer.list()),
+  pathsForFiles: (files) => window.api.app.pathsForFiles(files),
+  onUpdate: (listener) => window.api.events.on('transfer:update', (e) => listener(e.jobs)),
+  onConflict: (listener) => window.api.events.on('transfer:conflict', listener),
+  onConflictCancel: (listener) =>
+    window.api.events.on('transfer:conflictCancel', (e) => listener(e.id)),
+  loadLayout: () => unwrap(window.api.layout.load()),
+  saveLayout: (layout) => unwrap(window.api.layout.save(layout))
 }

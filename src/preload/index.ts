@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { BridgerApi, IpcChannel, IpcRequest, IpcResponse, IpcResult } from '@shared/ipc'
 
 function invoke<C extends IpcChannel>(
@@ -26,7 +26,20 @@ const api: BridgerApi = {
   app: {
     copyText: (req) => invoke('app:copyText', req),
     capabilities: () => invoke('app:capabilities', undefined),
-    pickFile: (req) => invoke('app:pickFile', req)
+    pickFile: (req) => invoke('app:pickFile', req),
+    pathsForFiles: (files) => files.map((f) => webUtils.getPathForFile(f)).filter((p) => p !== '')
+  },
+  transfer: {
+    start: (req) => invoke('transfer:start', req),
+    cancel: (req) => invoke('transfer:cancel', req),
+    resolve: (req) => invoke('transfer:resolve', req),
+    retry: (req) => invoke('transfer:retry', req),
+    clear: (req) => invoke('transfer:clear', req),
+    list: () => invoke('transfer:list', undefined)
+  },
+  layout: {
+    load: () => invoke('layout:load', undefined),
+    save: (req) => invoke('layout:save', req)
   },
   profiles: {
     list: () => invoke('profiles:list', undefined),

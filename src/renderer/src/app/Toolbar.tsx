@@ -22,6 +22,7 @@ export function Toolbar() {
           onSelect: () => void workspaceStore.getState().openRemote(p.id)
         }))),
     { separator: true },
+    { label: 'New local column', onSelect: () => workspaceStore.getState().addLocalColumn() },
     { label: 'New connection…', onSelect: () => show({ kind: 'profile', connectAfterSave: true }) },
     { label: 'Import from ~/.ssh/config…', onSelect: () => show({ kind: 'import' }) },
     { label: 'Manage connections…', onSelect: () => show({ kind: 'manage' }) }

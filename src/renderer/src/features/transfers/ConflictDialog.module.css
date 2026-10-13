@@ -1,0 +1,47 @@
+.note {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+}
+
+.sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.side h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.side dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.side dt {
+  color: var(--muted);
+}
+
+.side dd {
+  margin: 0;
+}
+
+.newer {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

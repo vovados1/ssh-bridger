@@ -12,7 +12,11 @@ export interface TcpProxy {
 }
 
 /** A forwarder in front of a server so tests can cut the connection without touching the server. */
-export async function startProxy(targetPort: number): Promise<TcpProxy> {
+export async function startProxy(
+  targetPort: number,
+  /** Added to every chunk in each direction, simulating a slow link (round trip = 2x). */
+  latencyMs = 0
+): Promise<TcpProxy> {
   const sockets = new Set<Socket>()
   let server: Server | undefined
 
@@ -25,8 +29,21 @@ export async function startProxy(targetPort: number): Promise<TcpProxy> {
           sock.on('close', () => sockets.delete(sock))
           sock.on('error', () => sock.destroy())
         }
-        client.pipe(upstream)
-        upstream.pipe(client)
+        if (latencyMs > 0) {
+          // Equal timers fire in creation order, so chunks stay in sequence.
+          const relay = (from: Socket, to: Socket): void => {
+            from.on('data', (chunk) => {
+              setTimeout(() => {
+                if (!to.destroyed) to.write(chunk)
+              }, latencyMs)
+            })
+          }
+          relay(client, upstream)
+          relay(upstream, client)
+        } else {
+          client.pipe(upstream)
+          upstream.pipe(client)
+        }
         upstream.on('close', () => client.destroy())
         client.on('close', () => upstream.destroy())
       })

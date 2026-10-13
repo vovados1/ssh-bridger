@@ -4,12 +4,64 @@
   overflow-x: auto;
 }
 
-.area > * {
-  flex: 1 1 380px;
-  min-width: 320px;
-  border-right: 1px solid var(--border);
+.slot {
+  position: relative;
+  min-width: 260px;
+  min-height: 0;
 }
 
-.area > *:last-child {
-  border-right: 0;
+.slot[data-dragging='true'] {
+  opacity: 0.5;
+}
+
+/* Insertion marker while a column header is dragged over this column. */
+.slot[data-drop-side='before']::before,
+.slot[data-drop-side='after']::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 4px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.slot[data-drop-side='before']::before {
+  left: -2px;
+}
+
+.slot[data-drop-side='after']::after {
+  right: -2px;
+}
+
+.splitter {
+  flex: none;
+  position: relative;
+  width: 6px;
+  margin: 0 -3px;
+  z-index: 4;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* A thin visible line, with a wider area to grab. */
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--border);
+}
+
+.splitter:hover::before,
+.splitter:focus-visible::before {
+  background: var(--accent);
+}
+
+.splitter:focus-visible {
+  outline: none;
 }

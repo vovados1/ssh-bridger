@@ -16,7 +16,12 @@ export function Dialog({ title, onClose, children, footer, width = 420 }: Props)
 
   useEffect(() => {
     const el = ref.current
-    if (el && !el.open) el.showModal()
+    if (el && !el.open) {
+      el.showModal()
+      // showModal() focuses the first button unless the HTML `autofocus` attribute is present,
+      // which React does not render. Honor `data-autofocus` so the safe choice can be the default.
+      el.querySelector<HTMLElement>('[data-autofocus]')?.focus()
+    }
     return () => el?.close()
   }, [])
 

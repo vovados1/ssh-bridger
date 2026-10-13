@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -13,7 +14,11 @@ import type { FsClient } from '../../lib/fs-client'
 import { copyText } from '../../lib/api'
 import type { Notify } from '../../lib/toasts'
 import { ColumnContext, useColumn, useColumnStore } from './ColumnContext'
-import { createColumnStore } from './columnStore'
+import { createColumnStore, type ColumnInitial } from './columnStore'
+import { registerColumn } from './columnRegistry'
+import { NO_TRANSFER, type ColumnTransfer } from './columnTransfer'
+import { createColumnDnd } from './useColumnDnd'
+import type { SortDir, SortKey } from './sort'
 import { ContextMenu, type MenuItem } from '../../components/ContextMenu'
 import { ConfirmDeleteDialog } from './dialogs/ConfirmDeleteDialog'
 import { PermissionsDialog } from './dialogs/PermissionsDialog'
@@ -22,7 +27,17 @@ import { FileList, rowId } from './FileList'
 import { PathBar, type PathBarHandle } from './PathBar'
 import styles from './Column.module.css'
 
+/** The part of a column's state worth remembering between runs. */
+export interface ColumnViewState {
+  cwd: string | null
+  showHidden: boolean
+  sortKey: SortKey
+  sortDir: SortDir
+}
+
 export interface ColumnProps {
+  /** Stable id of this column in the workspace. */
+  id: string
   machineId: MachineId
   title: string
   fs: FsClient
@@ -34,9 +49,16 @@ export interface ColumnProps {
   /** Remote columns: the connection this column lives on. */
   connection?: { state: ConnectionState | undefined; reconnect(): void }
   onClose?: () => void
+  /** Folder and view settings restored from the saved layout. */
+  initial?: ColumnInitial
+  /** Called when the folder or view settings change, so they can be saved. */
+  onViewChange?: (view: ColumnViewState) => void
+  /** Clipboard and transfer actions. */
+  transfer?: ColumnTransfer
 }
 
 export function Column({
+  id,
   machineId,
   title,
   fs,
@@ -44,26 +66,64 @@ export function Column({
   canTrash = true,
   color,
   connection,
-  onClose
+  onClose,
+  initial,
+  onViewChange,
+  transfer = NO_TRANSFER
 }: ColumnProps) {
   const [store] = useState(() =>
-    createColumnStore({ machineId, fs, notify, watchKey: crypto.randomUUID() })
+    createColumnStore({
+      machineId,
+      fs,
+      notify,
+      watchKey: crypto.randomUUID(),
+      ...(initial ? { initial } : {})
+    })
   )
 
+  // A remote column can exist before its connection does (restored from the saved layout): it
+  // starts listing once connected, and picks up again, in the same folder, after a reconnect.
+  const ready = !connection || connection.state?.status === 'connected'
   useEffect(() => {
+    if (!ready) return
     void store.getState().init()
     return () => store.getState().dispose()
+  }, [store, ready])
+
+  useEffect(() => registerColumn(id, machineId, store), [id, machineId, store])
+
+  // Report folder and view changes so the layout can be saved.
+  const viewChange = useRef(onViewChange)
+  useEffect(() => {
+    viewChange.current = onViewChange
+  })
+  useEffect(() => {
+    let last = ''
+    return store.subscribe((s) => {
+      const key = `${s.cwd}|${s.showHidden}|${s.sortKey}|${s.sortDir}`
+      if (key === last) return
+      last = key
+      viewChange.current?.({
+        cwd: s.cwd,
+        showHidden: s.showHidden,
+        sortKey: s.sortKey,
+        sortDir: s.sortDir
+      })
+    })
   }, [store])
 
   return (
     <ColumnContext.Provider value={store}>
       <ColumnView
+        id={id}
+        machineId={machineId}
         title={title}
         notify={notify}
         canTrash={canTrash}
         color={color}
         connection={connection}
         onClose={onClose}
+        transfer={transfer}
       />
     </ColumnContext.Provider>
   )
@@ -76,19 +136,25 @@ type Overlay =
   | { kind: 'properties'; paths: string[]; entries: Entry[] }
 
 function ColumnView({
+  id,
+  machineId,
   title,
   notify,
   canTrash,
   color,
   connection,
-  onClose
+  onClose,
+  transfer
 }: {
+  id: string
+  machineId: MachineId
   title: string
   notify: Notify
   canTrash: boolean
   color: string | undefined
   connection: ColumnProps['connection']
   onClose: (() => void) | undefined
+  transfer: ColumnTransfer
 }) {
   const store = useColumnStore()
   const pathBar = useRef<PathBarHandle | null>(null)
@@ -101,19 +167,10 @@ function ColumnView({
   const selectedCount = useColumn((s) => s.selected.size)
   const renaming = useColumn((s) => s.renaming)
 
-  // After the connection comes back, show what is on the server now.
-  const status = connection?.state?.status
-  const lastStatus = useRef(status)
-  useEffect(() => {
-    if (
-      lastStatus.current !== undefined &&
-      lastStatus.current !== 'connected' &&
-      status === 'connected'
-    ) {
-      void store.getState().refresh()
-    }
-    lastStatus.current = status
-  }, [status, store])
+  const dnd = useMemo(
+    () => createColumnDnd(store, id, machineId, transfer),
+    [store, id, machineId, transfer]
+  )
 
   // Menus, dialogs and the rename field all leave focus on <body> when they go away; hand it
   // back to the list so shortcuts keep working. (Focusing earlier fails: a modal dialog makes
@@ -161,6 +218,19 @@ function ColumnView({
     })
   }
 
+  const selectedPaths = (): string[] =>
+    store
+      .getState()
+      .selectedEntries()
+      .map((e) => e.path)
+  const copySelection = () => transfer.copy(machineId, selectedPaths())
+  const cutSelection = () => transfer.cut(machineId, selectedPaths())
+  /** Paste into the current folder, or into the folder the menu was opened on. */
+  const pasteInto = (dir?: string) => {
+    const target = dir ?? store.getState().cwd
+    if (target !== null) transfer.paste({ machineId, dir: target })
+  }
+
   // ---- context menu --------------------------------------------------------------------------
 
   const menuItems = (entry: Entry | null): MenuItem[] => {
@@ -173,6 +243,13 @@ function ColumnView({
       return [
         { label: 'New Folder', shortcut: 'Ctrl+Shift+N', onSelect: () => void s.create('folder') },
         { label: 'New File', shortcut: 'Ctrl+Alt+N', onSelect: () => void s.create('file') },
+        { separator: true },
+        {
+          label: 'Paste',
+          shortcut: 'Ctrl+V',
+          disabled: !transfer.canPaste,
+          onSelect: () => pasteInto()
+        },
         { separator: true },
         { label: 'Refresh', shortcut: 'F5', onSelect: () => void s.refresh() },
         {
@@ -196,6 +273,15 @@ function ColumnView({
         shortcut: 'Enter',
         disabled: !one || !isDirLike(one),
         onSelect: () => one && void s.open(one)
+      },
+      { separator: true },
+      { label: 'Cut', shortcut: 'Ctrl+X', onSelect: cutSelection },
+      { label: 'Copy', shortcut: 'Ctrl+C', onSelect: copySelection },
+      {
+        label: one && isDirLike(one) ? 'Paste Into Folder' : 'Paste',
+        shortcut: 'Ctrl+V',
+        disabled: !transfer.canPaste,
+        onSelect: () => pasteInto(one && isDirLike(one) ? one.path : undefined)
       },
       { separator: true },
       { label: 'Rename', shortcut: 'F2', disabled: !one, onSelect: () => s.startRename(one?.path) },
@@ -300,6 +386,19 @@ function ColumnView({
         }
         case 'Escape':
           s.clearSelection()
+          transfer.cancelCut()
+          return true
+        case 'c':
+          if (!mod) return false
+          copySelection()
+          return true
+        case 'x':
+          if (!mod) return false
+          cutSelection()
+          return true
+        case 'v':
+          if (!mod) return false
+          pasteInto()
           return true
         case 'a':
           if (!mod) return false
@@ -336,6 +435,9 @@ function ColumnView({
     >
       <header
         className={styles.title}
+        data-column-header={id}
+        draggable
+        title="Drag to reorder"
         style={color ? { boxShadow: `inset 0 3px 0 ${color}` } : undefined}
       >
         {connection && <StatusDot status={connection.state?.status} />}
@@ -365,7 +467,12 @@ function ColumnView({
           </button>
         </div>
       )}
-      <FileList pageSizeRef={pageSize} onContextMenu={onContextMenu} />
+      <FileList
+        pageSizeRef={pageSize}
+        onContextMenu={onContextMenu}
+        dnd={dnd}
+        cutPaths={transfer.cutPaths}
+      />
       <footer className={styles.status}>
         {count} {count === 1 ? 'item' : 'items'}
         {selectedCount > 0 && ` · ${selectedCount} selected`}

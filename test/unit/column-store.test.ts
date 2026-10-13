@@ -127,6 +127,64 @@ describe('init', () => {
   })
 })
 
+describe('restoring a saved column', () => {
+  const fresh = (
+    initial: Parameters<typeof createColumnStore>[0]['initial'],
+    fs = fakeFs(tree())
+  ) => {
+    const store = createColumnStore({ machineId: 'local', fs, notify: () => {}, initial })
+    return { store, fs, s: () => store.getState() }
+  }
+
+  it('opens the saved folder instead of home', async () => {
+    const { store, s } = fresh({ path: '/home/me/src' })
+    await store.getState().init()
+    expect(s().cwd).toBe('/home/me/src')
+    expect(s().history).toEqual(['/home/me/src'])
+    expect(s().home).toBe('/home/me')
+  })
+
+  it('falls back to home, silently, when the saved folder is gone', async () => {
+    const { store, s } = fresh({ path: '/home/me/deleted-long-ago' })
+    await store.getState().init()
+    expect(s().cwd).toBe('/home/me')
+    expect(s().error).toBeNull()
+  })
+
+  it('applies saved view settings before anything is listed', async () => {
+    const { store, s } = fresh({ showHidden: true, sortKey: 'size', sortDir: 'desc' })
+    expect(s()).toMatchObject({ showHidden: true, sortKey: 'size', sortDir: 'desc' })
+    await store.getState().init()
+    expect(s().visible.map((e) => e.name)).toContain('.secret')
+  })
+
+  it('does not override a navigation the user made while the saved folder was loading', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const { store, s } = fresh({ path: '/home/me/src' }, fakeFs(tree(), { '/home/me/src': gate }))
+    const init = store.getState().init()
+    await new Promise((r) => setTimeout(r, 5))
+    await store.getState().navigate('/home')
+    release()
+    await init
+    expect(s().cwd).toBe('/home')
+  })
+
+  it('resuming after a reconnect keeps the current folder, re-watches it and reloads', async () => {
+    const fs = fakeFs(tree())
+    const { store, s } = fresh({}, fs)
+    await store.getState().init()
+    await store.getState().navigate('src')
+    store.getState().dispose()
+    fs.tree['/home/me/src']!.push(file('/home/me/src', 'new-after-reconnect.ts'))
+    fs.watched.length = 0
+    await store.getState().init()
+    expect(s().cwd).toBe('/home/me/src')
+    expect(fs.watched).toEqual([{ path: '/home/me/src', key: 'column' }])
+    expect(s().visible.map((e) => e.name)).toContain('new-after-reconnect.ts')
+  })
+})
+
 describe('refresh', () => {
   it('reloads and keeps the selection that still exists', async () => {
     const t = tree()

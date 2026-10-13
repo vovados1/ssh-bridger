@@ -5,6 +5,8 @@ import {
   lstat,
   mkdir,
   open,
+  utimes,
+  symlink as fsSymlink,
   readdir,
   readlink,
   realpath,
@@ -25,10 +27,14 @@ import { baseName, joinPath } from '@shared/posix-path'
 import { mapLimit } from './async'
 import { toFsError } from './errors'
 import { lookupOwner } from './owners'
-import type { FileSystemProvider, RemoveOptions } from './provider'
+import type { Readable, Writable } from 'node:stream'
+import type { FileSystemProvider, RemoveOptions, RenameOptions } from './provider'
 
 /** Enough parallel lstats to keep the disk busy without exhausting file descriptors. */
 const STAT_CONCURRENCY = 64
+
+/** Read and write buffer size for streaming copies. */
+const STREAM_CHUNK = 256 * 1024
 
 type Kind = Pick<Stats, 'isDirectory' | 'isFile' | 'isSymbolicLink'>
 
@@ -137,19 +143,19 @@ export class LocalProvider implements FileSystemProvider {
     }
   }
 
-  async rename(from: string, to: string): Promise<void> {
+  async rename(from: string, to: string, { overwrite = false }: RenameOptions = {}): Promise<void> {
     try {
-      // rename(2) silently replaces the target, so check first. A file created in the
-      // gap between the check and the rename would be replaced; acceptable for a UI action.
-      const taken = await lstat(to).then(
-        () => true,
-        (err: NodeJS.ErrnoException) => {
-          if (err.code === 'ENOENT') return false
-          throw err
-        }
-      )
-      if (taken)
+      // rename(2) silently replaces the target, so check first unless the caller wants that.
+      // A file created in the gap between the check and the rename would be replaced;
+      // acceptable for a UI action.
+      const existing = await lstat(to).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return null
+        throw err
+      })
+      // Overwrite replaces files only; a folder in the way is always a conflict.
+      if (existing && (!overwrite || existing.isDirectory())) {
         throw new FsError({ code: 'EEXIST', path: to, message: `"${baseName(to)}" already exists` })
+      }
       await rename(from, to)
     } catch (err) {
       throw toFsError(err, from)
@@ -188,6 +194,44 @@ export class LocalProvider implements FileSystemProvider {
   async chmod(path: string, mode: number): Promise<void> {
     try {
       await chmod(path, mode)
+    } catch (err) {
+      throw toFsError(err, path)
+    }
+  }
+
+  async openRead(path: string, { start = 0 }: { start?: number } = {}): Promise<Readable> {
+    try {
+      const handle = await open(path, 'r')
+      return handle.createReadStream({ start, highWaterMark: STREAM_CHUNK })
+    } catch (err) {
+      throw toFsError(err, path)
+    }
+  }
+
+  async openWrite(
+    path: string,
+    { mode = 0o666, exclusive = false }: { mode?: number; exclusive?: boolean } = {}
+  ): Promise<Writable> {
+    try {
+      const handle = await open(path, exclusive ? 'wx' : 'w', mode)
+      return handle.createWriteStream({ highWaterMark: STREAM_CHUNK })
+    } catch (err) {
+      throw toFsError(err, path)
+    }
+  }
+
+  async setTimes(path: string, mtimeMs: number): Promise<void> {
+    try {
+      const { atimeMs } = await lstat(path)
+      await utimes(path, atimeMs / 1000, mtimeMs / 1000)
+    } catch (err) {
+      throw toFsError(err, path)
+    }
+  }
+
+  async symlink(target: string, path: string): Promise<void> {
+    try {
+      await fsSymlink(target, path)
     } catch (err) {
       throw toFsError(err, path)
     }

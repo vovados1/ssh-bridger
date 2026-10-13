@@ -14,6 +14,13 @@ import {
   SshConfigCandidateSchema
 } from './connection-schemas'
 import type { ConnectionState, PromptRequest } from './connections'
+import {
+  ConflictAnswerSchema,
+  JobSnapshotSchema,
+  LayoutSchema,
+  TransferRequestSchema
+} from './transfer-schemas'
+import type { ConflictPrompt, JobSnapshot } from './transfers'
 import type { FsErrorData } from './fs-types'
 
 const onMachine = z.object({ machineId: MachineIdSchema })
@@ -71,6 +78,26 @@ export const ipcContract = {
     response: z.array(ConnectionProfileSchema)
   },
 
+  /** Start copying or moving files. Resolves once the job is queued; progress arrives as events. */
+  'transfer:start': { request: TransferRequestSchema, response: z.object({ jobId: z.string() }) },
+  'transfer:cancel': { request: z.object({ jobId: z.string().min(1) }), response: done },
+  /** Answer a `transfer:conflict` question. */
+  'transfer:resolve': {
+    request: ConflictAnswerSchema.extend({ conflictId: z.string().min(1) }),
+    response: done
+  },
+  /** Run a finished job again, skipping what is already up to date. */
+  'transfer:retry': {
+    request: z.object({ jobId: z.string().min(1) }),
+    response: z.object({ jobId: z.string() })
+  },
+  /** Forget finished jobs; all of them when no id is given. */
+  'transfer:clear': { request: z.object({ jobId: z.string().min(1).optional() }), response: done },
+  'transfer:list': { request: z.void(), response: z.array(JobSnapshotSchema) },
+
+  'layout:load': { request: z.void(), response: LayoutSchema.nullable() },
+  'layout:save': { request: LayoutSchema, response: done },
+
   /** Resolves once connected; rejects with EAUTH / ECONNECT / EHOSTKEY / ECANCELLED otherwise. */
   'conn:connect': { request: z.object({ profileId: z.string().min(1) }), response: done },
   'conn:disconnect': { request: z.object({ profileId: z.string().min(1) }), response: done },
@@ -90,6 +117,11 @@ export interface IpcEvents {
   'conn:prompt': PromptRequest
   /** A prompt is no longer needed (the connection attempt ended). */
   'conn:promptCancel': { id: string }
+  /** Jobs whose progress or state changed (batched, at most every 100 ms). */
+  'transfer:update': { jobs: JobSnapshot[] }
+  'transfer:conflict': ConflictPrompt
+  /** A conflict question is moot (job cancelled, or answered for all). */
+  'transfer:conflictCancel': { id: string }
 }
 
 export type IpcContract = typeof ipcContract
@@ -125,6 +157,8 @@ export interface BridgerApi {
     copyText: Call<'app:copyText'>
     capabilities: Call<'app:capabilities'>
     pickFile: Call<'app:pickFile'>
+    /** Real paths of files dropped from the desktop. Resolved in the preload; never sent over IPC. */
+    pathsForFiles(files: File[]): string[]
   }
   profiles: {
     list: Call<'profiles:list'>
@@ -140,6 +174,18 @@ export interface BridgerApi {
     disconnect: Call<'conn:disconnect'>
     states: Call<'conn:states'>
     respond: Call<'conn:respond'>
+  }
+  transfer: {
+    start: Call<'transfer:start'>
+    cancel: Call<'transfer:cancel'>
+    resolve: Call<'transfer:resolve'>
+    retry: Call<'transfer:retry'>
+    clear: Call<'transfer:clear'>
+    list: Call<'transfer:list'>
+  }
+  layout: {
+    load: Call<'layout:load'>
+    save: Call<'layout:save'>
   }
   events: {
     /** Subscribe to a main-to-renderer message. Returns an unsubscribe function. */
