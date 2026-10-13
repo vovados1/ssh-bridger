@@ -1,0 +1,142 @@
+.scroller {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  min-width: 560px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.headerCell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.headerCell:hover {
+  color: var(--fg);
+}
+
+.sortMark {
+  font-size: 8px;
+}
+
+.rows {
+  position: relative;
+  min-width: 560px;
+}
+
+.row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  cursor: default;
+  user-select: none;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.row[data-selected='true'] {
+  background: var(--bg-selected-inactive);
+}
+
+:global(section:focus-within) .row[data-selected='true'] {
+  background: var(--bg-selected);
+}
+
+.row[data-cursor='true'] {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.row[data-broken='true'] .name {
+  color: var(--error-fg);
+}
+
+.cell {
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.colName {
+  flex: 1 1 0;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.colSize {
+  flex: 0 0 90px;
+  text-align: right;
+  justify-content: flex-end;
+}
+
+.colDate {
+  flex: 0 0 140px;
+}
+
+.colMode {
+  flex: 0 0 110px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.header .colName {
+  flex: 1 1 0;
+}
+
+.icon {
+  display: grid;
+  flex: none;
+  color: var(--muted);
+}
+
+.row[data-dir='true'] .icon {
+  color: var(--folder);
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row[data-dir='true'] .name {
+  font-weight: 500;
+}
+
+.link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty {
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}

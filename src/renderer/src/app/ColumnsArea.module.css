@@ -1,0 +1,9 @@
+.area {
+  display: flex;
+  height: 100%;
+}
+
+.area > * {
+  flex: 1 1 0;
+  min-width: 0;
+}

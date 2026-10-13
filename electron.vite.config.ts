@@ -33,6 +33,7 @@ export default defineConfig({
   preload: { resolve: { alias: { '@shared': shared } } },
   renderer: {
     resolve: { alias: { '@shared': shared, '@': resolve('src/renderer/src') } },
+    build: { minify: 'esbuild' },
     plugins: [react(), csp()]
   }
 })
