@@ -3,6 +3,8 @@
   min-height: 0;
   overflow: auto;
   position: relative;
+  /* Narrow columns drop the less useful columns instead of scrolling sideways. */
+  container-type: inline-size;
 }
 
 .header {
@@ -10,7 +12,6 @@
   top: 0;
   z-index: 1;
   display: flex;
-  min-width: 560px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
 }
@@ -39,7 +40,6 @@
 
 .rows {
   position: relative;
-  min-width: 560px;
 }
 
 .row {
@@ -82,7 +82,7 @@
 
 .colName {
   flex: 1 1 0;
-  min-width: 200px;
+  min-width: 120px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -166,4 +166,16 @@
 
 .scroller[data-drop='true'] {
   box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+@container (max-width: 479px) {
+  .colMode {
+    display: none;
+  }
+}
+
+@container (max-width: 359px) {
+  .colDate {
+    display: none;
+  }
 }

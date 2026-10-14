@@ -7,6 +7,15 @@ export class Semaphore {
     this.available = permits
   }
 
+  /** Change the number of permits. Holders keep theirs; a smaller limit takes effect as they release. */
+  resize(delta: number): void {
+    this.available += delta
+    while (this.available > 0 && this.waiters.length > 0) {
+      this.available--
+      this.waiters.shift()!.resolve()
+    }
+  }
+
   acquire(signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return Promise.reject(signal.reason)
     if (this.available > 0) {
@@ -32,8 +41,13 @@ export class Semaphore {
   }
 
   release(): void {
-    const next = this.waiters.shift()
-    if (next) next.resolve()
-    else this.available++
+    this.available++
+    if (this.available > 0) {
+      const next = this.waiters.shift()
+      if (next) {
+        this.available--
+        next.resolve()
+      }
+    }
   }
 }

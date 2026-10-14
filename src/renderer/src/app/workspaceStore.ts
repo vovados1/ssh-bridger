@@ -38,6 +38,7 @@ export type Dialog =
   | { kind: 'profile'; profileId?: string; connectAfterSave?: boolean }
   | { kind: 'manage' }
   | { kind: 'import' }
+  | { kind: 'settings' }
   | { kind: 'connectError'; profileName: string; error: FsError }
 
 export interface WorkspaceState {

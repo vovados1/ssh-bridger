@@ -21,6 +21,8 @@ import {
   TransferRequestSchema
 } from './transfer-schemas'
 import type { ConflictPrompt, JobSnapshot } from './transfers'
+import { SettingsSchema } from './settings-schemas'
+import type { Settings } from './settings'
 import type { FsErrorData } from './fs-types'
 
 const onMachine = z.object({ machineId: MachineIdSchema })
@@ -98,6 +100,10 @@ export const ipcContract = {
   'layout:load': { request: z.void(), response: LayoutSchema.nullable() },
   'layout:save': { request: LayoutSchema, response: done },
 
+  'settings:load': { request: z.void(), response: SettingsSchema },
+  /** Applies at once; resolves to what was stored (bad values are replaced by defaults). */
+  'settings:save': { request: SettingsSchema, response: SettingsSchema },
+
   /** Resolves once connected; rejects with EAUTH / ECONNECT / EHOSTKEY / ECANCELLED otherwise. */
   'conn:connect': { request: z.object({ profileId: z.string().min(1) }), response: done },
   'conn:disconnect': { request: z.object({ profileId: z.string().min(1) }), response: done },
@@ -122,6 +128,7 @@ export interface IpcEvents {
   'transfer:conflict': ConflictPrompt
   /** A conflict question is moot (job cancelled, or answered for all). */
   'transfer:conflictCancel': { id: string }
+  'settings:changed': Settings
 }
 
 export type IpcContract = typeof ipcContract
@@ -186,6 +193,10 @@ export interface BridgerApi {
   layout: {
     load: Call<'layout:load'>
     save: Call<'layout:save'>
+  }
+  settings: {
+    load: Call<'settings:load'>
+    save: Call<'settings:save'>
   }
   events: {
     /** Subscribe to a main-to-renderer message. Returns an unsubscribe function. */

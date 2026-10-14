@@ -9,8 +9,10 @@
   --muted: #6b6b70;
   --border: #dcdce0;
   --accent: #2f6fe4;
+  --on-accent: #ffffff;
   --error-bg: #fde8e8;
   --error-fg: #b42318;
+  --on-danger: #ffffff;
   --folder: #3b82f6;
   --ok: #1a9d4b;
   --warn: #d98a00;
@@ -29,8 +31,10 @@
     --muted: #9a9aa0;
     --border: #38383d;
     --accent: #6ea0ff;
+    --on-accent: #0b1730;
     --error-bg: #46201f;
     --error-fg: #ffb4ab;
+    --on-danger: #3a0b08;
     --folder: #6ea0ff;
     --ok: #3ddc84;
     --warn: #ffb020;

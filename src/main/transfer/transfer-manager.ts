@@ -26,16 +26,28 @@ export interface TransferDeps {
   emitConflict(prompt: ConflictPrompt): void
   emitConflictCancel(id: string): void
   now?: () => number
-  /** Files copied at once within one job. */
-  perJobConcurrency?: number
-  /** Files copied at once across all jobs, so a pile of jobs can't saturate a connection. */
-  globalConcurrency?: number
-  /** Jobs running at once; the rest wait in the queue. */
-  maxRunningJobs?: number
   /** Progress events are batched to at most one per this many ms. */
   flushMs?: number
+  /** Read when it matters, so changing settings applies without a restart. */
+  limits?: () => TransferLimits
+}
+
+export interface TransferLimits {
+  /** Files copied at once within one job (read when the job starts). */
+  perJobConcurrency: number
+  /** Files copied at once across all jobs, so a pile of jobs can't saturate a connection. */
+  globalConcurrency: number
+  /** Jobs running at once; the rest wait in the queue. */
+  maxRunningJobs: number
   /** Keep permissions and modification times on copies. */
-  preserveAttributes?: boolean
+  preserveAttributes: boolean
+}
+
+export const DEFAULT_LIMITS: TransferLimits = {
+  perJobConcurrency: 3,
+  globalConcurrency: 6,
+  maxRunningJobs: 2,
+  preserveAttributes: true
 }
 
 const MAX_REPORTED_ERRORS = 50
@@ -161,8 +173,23 @@ export class TransferManager {
   private readonly now: () => number
 
   constructor(private readonly deps: TransferDeps) {
-    this.global = new Semaphore(deps.globalConcurrency ?? 6)
+    this.appliedGlobal = this.limits().globalConcurrency
+    this.global = new Semaphore(this.appliedGlobal)
     this.now = deps.now ?? Date.now
+  }
+
+  private appliedGlobal: number
+
+  private limits(): TransferLimits {
+    return this.deps.limits?.() ?? DEFAULT_LIMITS
+  }
+
+  /** The limits changed: resize the shared pool and start queued jobs that now fit. */
+  limitsChanged(): void {
+    const next = this.limits().globalConcurrency
+    this.global.resize(next - this.appliedGlobal)
+    this.appliedGlobal = next
+    this.pump()
   }
 
   // ---- public API --------------------------------------------------------------------------
@@ -265,7 +292,7 @@ export class TransferManager {
   // ---- scheduling --------------------------------------------------------------------------
 
   private pump(): void {
-    const limit = this.deps.maxRunningJobs ?? 2
+    const limit = this.limits().maxRunningJobs
     while (this.runningJobs < limit && this.queue.length > 0) {
       const job = this.queue.shift()!
       if (aborted(job)) continue
@@ -287,7 +314,7 @@ export class TransferManager {
       dst,
       same: request.source.machineId === request.dest.machineId,
       move: request.mode === 'move',
-      pool: new TaskPool(this.deps.perJobConcurrency ?? 3, this.global, job.signal),
+      pool: new TaskPool(this.limits().perJobConcurrency, this.global, job.signal),
       finalizers: [],
       emptied: []
     }
@@ -707,7 +734,7 @@ export class TransferManager {
   }
 
   private preserve(): boolean {
-    return this.deps.preserveAttributes ?? true
+    return this.limits().preserveAttributes
   }
 
   private isFinished(job: Job): boolean {

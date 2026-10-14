@@ -295,3 +295,66 @@ describe('selection and cursor', () => {
     expect(s().selected.size).toBe(0)
   })
 })
+
+describe('background polling', () => {
+  it('picks up changes made elsewhere without a spinner, keeping the selection', async () => {
+    const { store, s, fs } = await started()
+    s().selectOnly('/home/me/b.txt')
+    let sawLoading = false
+    store.subscribe((st) => {
+      if (st.loading) sawLoading = true
+    })
+    fs.tree['/home/me']!.push(file('/home/me', 'new.txt'))
+    await s().poll()
+    expect(s().visible.map((e) => e.name)).toContain('new.txt')
+    expect(s().selected.has('/home/me/b.txt')).toBe(true)
+    expect(sawLoading).toBe(false)
+  })
+
+  it('does nothing visible when nothing changed', async () => {
+    const { s } = await started()
+    const before = s().visible
+    await s().poll()
+    expect(s().visible).toBe(before) // same array: nothing was recomputed
+  })
+
+  it('stays silent when the listing fails', async () => {
+    const { s, fs } = await started()
+    delete fs.tree['/home/me']
+    await s().poll()
+    expect(s().error).toBeNull()
+    expect(s().visible.length).toBeGreaterThan(0) // the old listing stays on screen
+  })
+
+  it('never cancels a navigation that started while it was listing', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const fs = fakeFs(tree(), {})
+    const store = createColumnStore({ machineId: 'local', fs, notify: () => {} })
+    await store.getState().init()
+    const list = fs.list
+    let first = true
+    fs.list = async (m, p) => {
+      if (first && p === '/home/me') {
+        first = false
+        await gate // the poll's listing is slow
+      }
+      return list(m, p)
+    }
+    fs.tree['/home/me']!.push(file('/home/me', 'late.txt'))
+    const polling = store.getState().poll()
+    await store.getState().navigate('src')
+    release()
+    await polling
+    expect(store.getState().cwd).toBe('/home/me/src') // the late poll must not drag us back
+  })
+
+  it('leaves a name being typed alone', async () => {
+    const { s, fs } = await started()
+    s().startRename('/home/me/a.txt')
+    fs.tree['/home/me']!.push(file('/home/me', 'new.txt'))
+    await s().poll()
+    expect(s().visible.map((e) => e.name)).not.toContain('new.txt')
+    expect(s().renaming).toBe('/home/me/a.txt')
+  })
+})

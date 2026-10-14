@@ -1,4 +1,4 @@
-import { utils, type AnyAuthMethod } from 'ssh2'
+import type { AnyAuthMethod } from 'ssh2'
 import { describe, expect, it } from 'vitest'
 import { FsError } from '@shared/fs-types'
 import {
@@ -12,6 +12,7 @@ import {
   makeAuthHandler,
   type AuthDeps
 } from '../../src/main/ssh/auth'
+import { generateUsableKey } from '../helpers/auth-server'
 import type { NewPrompt, Prompter } from '../../src/main/ssh/prompter'
 import {
   SecretStore,
@@ -20,12 +21,8 @@ import {
   type Cipher
 } from '../../src/main/store/secret-store'
 
-const plainKey = utils.generateKeyPairSync('ed25519').private
-const encryptedKey = utils.generateKeyPairSync('ed25519', {
-  passphrase: 'swordfish',
-  cipher: 'aes256-ctr',
-  rounds: 4
-}).private
+const plainKey = generateUsableKey().private
+const encryptedKey = generateUsableKey('swordfish').private
 
 const profile = (over: Partial<ConnectionProfile> = {}): ConnectionProfile => ({
   id: 'p1',

@@ -58,6 +58,13 @@ export function Toolbar() {
       >
         Connections
       </button>
+      <button
+        className={styles.plain}
+        title="Settings (Ctrl+,)"
+        onClick={() => show({ kind: 'settings' })}
+      >
+        Settings
+      </button>
     </div>
   )
 }

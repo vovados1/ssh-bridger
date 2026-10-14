@@ -143,6 +143,8 @@ export function FileList({ pageSizeRef, onContextMenu, dnd, cutPaths }: FileList
   const sortDir = useColumn((s) => s.sortDir)
   const cwd = useColumn((s) => s.cwd)
   const renaming = useColumn((s) => s.renaming)
+  const loading = useColumn((s) => s.loading)
+  const hiddenCount = useColumn((s) => s.entries.length - s.visible.length)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   // React Compiler is not used here, so its warning about TanStack Virtual's unmemoizable API is moot.
@@ -270,8 +272,17 @@ export function FileList({ pageSizeRef, onContextMenu, dnd, cutPaths }: FileList
           )
         })}
       </div>
+      {visible.length === 0 && cwd === null && loading && (
+        <div className={styles.empty} role="status">
+          Loading…
+        </div>
+      )}
       {visible.length === 0 && cwd !== null && (
-        <div className={styles.empty}>This folder is empty</div>
+        <div className={styles.empty}>
+          {hiddenCount > 0
+            ? `Only hidden items here (${hiddenCount}). Press Ctrl+H to show them.`
+            : 'This folder is empty'}
+        </div>
       )}
     </div>
   )

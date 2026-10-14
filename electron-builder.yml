@@ -1,0 +1,45 @@
+# Linux packages: `pnpm package` writes an AppImage, a .deb and a pacman package to release/.
+appId: dev.sshbridger.app
+productName: SSH Bridger
+copyright: Copyright © SSH Bridger contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+asar: true
+# ssh2 runs on its pure-JS fallback (see pnpm-workspace.yaml), so there is nothing to rebuild.
+npmRebuild: false
+electronLanguages: [en-US]
+artifactName: ${productName}-${version}-${arch}.${ext}
+linux:
+  target:
+    - AppImage
+    - deb
+    - pacman
+  icon: build/icons
+  category: Utility;FileTools;Network;
+  synopsis: File manager for your machine and any SSH host
+  description: >-
+    Browse your computer and any number of SSH/SFTP servers side by side, and drag files
+    between them. Create, rename, move, delete and change permissions on any machine.
+  maintainer: SSH Bridger Maintainers <maintainers@ssh-bridger.invalid>
+  executableName: ssh-bridger
+  desktop:
+    entry:
+      Name: SSH Bridger
+      Comment: File manager for your machine and any SSH host
+      Keywords: ssh;sftp;scp;files;transfer;remote;
+      StartupWMClass: SSH Bridger
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0

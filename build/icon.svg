@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1e4fb8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- two machines, side by side -->
+  <g fill="#ffffff">
+    <rect x="52" y="132" width="144" height="248" rx="22"/>
+    <rect x="316" y="132" width="144" height="248" rx="22"/>
+  </g>
+  <g fill="#1e4fb8" opacity="0.85">
+    <rect x="76" y="164" width="96" height="16" rx="8"/>
+    <rect x="76" y="204" width="72" height="16" rx="8"/>
+    <rect x="76" y="244" width="96" height="16" rx="8"/>
+    <rect x="76" y="284" width="60" height="16" rx="8"/>
+    <rect x="340" y="164" width="96" height="16" rx="8"/>
+    <rect x="340" y="204" width="60" height="16" rx="8"/>
+    <rect x="340" y="244" width="96" height="16" rx="8"/>
+    <rect x="340" y="284" width="72" height="16" rx="8"/>
+  </g>
+  <!-- the bridge: files going both ways -->
+  <g fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M214 216h84M278 192l24 24-24 24"/>
+    <path d="M298 296h-84M234 272l-24 24 24 24"/>
+  </g>
+</svg>

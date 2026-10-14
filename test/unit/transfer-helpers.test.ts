@@ -93,4 +93,35 @@ describe('Semaphore', () => {
     ctl.abort(new Error('nope'))
     await expect(s.acquire(ctl.signal)).rejects.toThrow('nope')
   })
+
+  it('wakes waiters when the limit grows', async () => {
+    const s = new Semaphore(1)
+    await s.acquire()
+    let woke = 0
+    void s.acquire().then(() => woke++)
+    void s.acquire().then(() => woke++)
+    await Promise.resolve()
+    s.resize(2)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(woke).toBe(2)
+  })
+
+  it('lets holders finish when the limit shrinks, then enforces it', async () => {
+    const s = new Semaphore(3)
+    await s.acquire()
+    await s.acquire()
+    await s.acquire()
+    s.resize(-2) // limit is now 1, three are held
+    let woke = 0
+    void s.acquire().then(() => woke++)
+    s.release() // 2 held
+    s.release() // 1 held: still at the limit
+    await Promise.resolve()
+    expect(woke).toBe(0)
+    s.release() // 0 held: the waiter gets in
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(woke).toBe(1)
+  })
 })

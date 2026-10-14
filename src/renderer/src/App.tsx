@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { ColumnsArea } from './app/ColumnsArea'
 import { DialogHost } from './app/DialogHost'
-import { connectionsStore, transfersStore, workspaceStore } from './app/stores'
+import { connectionsStore, settingsStore, transfersStore, workspaceStore } from './app/stores'
 import { ToastHost } from './app/ToastHost'
 import { Toolbar } from './app/Toolbar'
 import { PromptHost } from './features/connections/PromptHost'
@@ -25,11 +25,25 @@ export function App() {
       .then(() => workspaceStore.getState().restore())
       .catch(report('Could not load connections'))
     void transfersStore.getState().init().catch(report('Could not load transfers'))
+    void settingsStore.getState().init().catch(report('Could not load settings'))
 
     return () => {
       connectionsStore.getState().dispose()
       transfersStore.getState().dispose()
+      settingsStore.getState().dispose()
     }
+  }, [])
+
+  // Ctrl+, opens the settings, like most desktop apps.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.key === ',') {
+        e.preventDefault()
+        workspaceStore.getState().showDialog({ kind: 'settings' })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   return (
