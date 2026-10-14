@@ -41,6 +41,10 @@ const api: BridgerApi = {
     load: () => invoke('layout:load', undefined),
     save: (req) => invoke('layout:save', req)
   },
+  settings: {
+    load: () => invoke('settings:load', undefined),
+    save: (req) => invoke('settings:save', req)
+  },
   profiles: {
     list: () => invoke('profiles:list', undefined),
     save: (req) => invoke('profiles:save', req),

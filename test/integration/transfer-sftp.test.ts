@@ -1,5 +1,15 @@
 import { randomBytes } from 'node:crypto'
-import { chmod, mkdir, readdir, readlink, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readlink,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { MachineId } from '@shared/fs-types'
@@ -22,10 +32,13 @@ afterAll(async () => {
 let h: Harness
 let conns: SftpConnection[] = []
 let proxies: TcpProxy[] = []
+let scratchDirs: string[] = []
 afterEach(async () => {
   await h?.cleanup()
   await Promise.all(conns.map((c) => c.teardown()))
   await Promise.all(proxies.map((p) => p.stop()))
+  await Promise.all(scratchDirs.map((d) => rm(d, { recursive: true, force: true })))
+  scratchDirs = []
   conns = []
   proxies = []
 })
@@ -44,6 +57,7 @@ async function setup(opts: { latencyMs?: number; perJobConcurrency?: number } = 
   const scratchHolder = await (
     await import('node:fs/promises')
   ).mkdtemp(join((await import('node:os')).tmpdir(), 'bridger-x-'))
+  scratchDirs.push(scratchHolder)
   const a = await connectSftp(serverA, scratchHolder, portA)
   const b = await connectSftp(serverB, scratchHolder)
   conns.push(a, b)

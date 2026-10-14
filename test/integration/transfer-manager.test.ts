@@ -795,6 +795,53 @@ describe('scheduling and progress', () => {
     expect(h.mgr.list().find((j) => j.id === a)!.status).toBe('done')
   })
 
+  it('starts queued jobs when the running limit is raised', async () => {
+    const { src, dst } = await setup({
+      maxRunningJobs: 1,
+      wrap: (local, remote) => ({ local: slowReads(local, 20), 'ssh:fake': remote })
+    })
+    await (
+      await import('node:fs/promises')
+    ).writeFile(join(src, 'big.bin'), randomBytes(2 * 1024 * 1024))
+    await makeTree(src, { 'b.txt': 'b' })
+    const a = await h.mgr.start(
+      req(h, { machine: 'local', paths: [join(src, 'big.bin')] }, { machine: 'ssh:fake', dir: dst })
+    )
+    const b = await h.mgr.start(
+      req(h, { machine: 'local', paths: [join(src, 'b.txt')] }, { machine: 'ssh:fake', dir: dst })
+    )
+    expect(h.mgr.list().find((j) => j.id === b)!.status).toBe('queued')
+    h.limits.maxRunningJobs = 2
+    h.mgr.limitsChanged()
+    await h.waitFor(b, (j) => j.status !== 'queued')
+    expect(h.mgr.list().find((j) => j.id === a)!.status).not.toBe('done') // b did not wait for a
+    h.mgr.cancel(a)
+  })
+
+  it('applies a changed global file limit to transfers already running', async () => {
+    const stats = { open: 0, max: 0 }
+    const { src, dst } = await setup({
+      perJobConcurrency: 8,
+      globalConcurrency: 1,
+      wrap: (local, remote) => ({ local, 'ssh:fake': trackWrites(remote, stats) })
+    })
+    const files: Record<string, string> = {}
+    for (let i = 0; i < 10; i++) files[`f${i}.txt`] = 'data'
+    await makeTree(src, files)
+    h.limits.globalConcurrency = 4
+    h.mgr.limitsChanged()
+    const job = await h.run(
+      req(
+        h,
+        { machine: 'local', paths: Object.keys(files).map((f) => join(src, f)) },
+        { machine: 'ssh:fake', dir: dst }
+      )
+    )
+    expect(job.status).toBe('done')
+    expect(stats.max).toBeGreaterThan(1)
+    expect(stats.max).toBeLessThanOrEqual(4)
+  })
+
   it('reports speed, estimated time and the names being copied while running', async () => {
     const { src, dst } = await setup({
       wrap: (local, remote) => ({ local: slowReads(local, 10), 'ssh:fake': remote })

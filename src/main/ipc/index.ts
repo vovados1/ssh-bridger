@@ -6,6 +6,7 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  nativeTheme,
   safeStorage,
   shell,
   type WebContents
@@ -19,7 +20,9 @@ import { PromptBroker } from '../ssh/prompter'
 import { listCandidates } from '../ssh/ssh-config'
 import { LayoutStore } from '../store/layout-store'
 import { ProfileStore } from '../store/profile-store'
+import { SettingsStore } from '../store/settings-store'
 import { SecretStore, type Cipher } from '../store/secret-store'
+import type { Settings } from '@shared/settings'
 import { TransferManager } from '../transfer/transfer-manager'
 import { handle } from './register'
 import { WatchManager } from './watches'
@@ -58,7 +61,13 @@ export async function registerIpcHandlers(): Promise<() => Promise<void>> {
   const dataDir = app.getPath('userData')
   const profiles = new ProfileStore(join(dataDir, 'profiles.json'))
   const secrets = new SecretStore(join(dataDir, 'secrets.json'), keyringCipher)
-  await Promise.all([profiles.load(), secrets.load()])
+  const settings = new SettingsStore(join(dataDir, 'settings.json'))
+  await Promise.all([profiles.load(), secrets.load(), settings.load()])
+  // The window's `prefers-color-scheme` follows this, so the theme is right from the first paint.
+  const applyTheme = (s: Settings): void => {
+    nativeTheme.themeSource = s.theme
+  }
+  applyTheme(settings.get())
 
   const sshDir = join(homedir(), '.ssh')
   const sshConfigPath = join(sshDir, 'config')
@@ -84,7 +93,21 @@ export async function registerIpcHandlers(): Promise<() => Promise<void>> {
     machines: machines,
     emitUpdate: (jobs) => void broadcast('transfer:update', { jobs }),
     emitConflict: (prompt) => void broadcast('transfer:conflict', prompt),
-    emitConflictCancel: (id) => void broadcast('transfer:conflictCancel', { id })
+    emitConflictCancel: (id) => void broadcast('transfer:conflictCancel', { id }),
+    limits: () => {
+      const t = settings.get().transfers
+      return {
+        perJobConcurrency: t.filesPerTransfer,
+        globalConcurrency: t.totalFiles,
+        maxRunningJobs: t.parallelTransfers,
+        preserveAttributes: t.preserveAttributes
+      }
+    }
+  })
+  settings.onChange((s) => {
+    applyTheme(s)
+    transfers.limitsChanged()
+    void broadcast('settings:changed', s)
   })
 
   /** Clean up a window's watches once, when it goes away. */
@@ -169,6 +192,10 @@ export async function registerIpcHandlers(): Promise<() => Promise<void>> {
   handle('transfer:retry', async ({ jobId }) => ({ jobId: await transfers.retry(jobId) }))
   handle('transfer:clear', ({ jobId }) => transfers.clear(jobId))
   handle('transfer:list', () => transfers.list())
+
+  // ---- settings ----
+  handle('settings:load', () => settings.get())
+  handle('settings:save', (value) => settings.save(value))
 
   // ---- layout ----
   handle('layout:load', () => layout.load())

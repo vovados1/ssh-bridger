@@ -55,6 +55,8 @@ export interface ColumnProps {
   onViewChange?: (view: ColumnViewState) => void
   /** Clipboard and transfer actions. */
   transfer?: ColumnTransfer
+  /** Re-read the folder this often (seconds) when the machine can't announce changes. 0: never. */
+  pollSeconds?: number
 }
 
 export function Column({
@@ -69,7 +71,8 @@ export function Column({
   onClose,
   initial,
   onViewChange,
-  transfer = NO_TRANSFER
+  transfer = NO_TRANSFER,
+  pollSeconds = 0
 }: ColumnProps) {
   const [store] = useState(() =>
     createColumnStore({
@@ -91,6 +94,21 @@ export function Column({
   }, [store, ready])
 
   useEffect(() => registerColumn(id, machineId, store), [id, machineId, store])
+
+  // SSH servers can't push changes, so re-read the folder now and then while the window is in use.
+  const polled = connection !== undefined && ready
+  useEffect(() => {
+    if (!polled || pollSeconds <= 0) return
+    const poll = (): void => {
+      if (!document.hidden) void store.getState().poll()
+    }
+    const timer = setInterval(poll, pollSeconds * 1000)
+    document.addEventListener('visibilitychange', poll) // catch up when coming back to the window
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', poll)
+    }
+  }, [store, polled, pollSeconds])
 
   // Report folder and view changes so the layout can be saved.
   const viewChange = useRef(onViewChange)
@@ -163,6 +181,8 @@ function ColumnView({
   const [overlay, setOverlay] = useState<Overlay | null>(null)
 
   const error = useColumn((s) => s.error)
+  const loading = useColumn((s) => s.loading)
+  const listed = useColumn((s) => s.cwd !== null)
   const count = useColumn((s) => s.visible.length)
   const selectedCount = useColumn((s) => s.selected.size)
   const renaming = useColumn((s) => s.renaming)
@@ -459,12 +479,24 @@ function ColumnView({
           <ConnectionBanner state={connection.state} onReconnect={connection.reconnect} />
         )}
       <PathBar handleRef={pathBar} />
+      <div className={styles.progress} data-busy={loading} role="presentation" />
       {error && (
         <div className={styles.error} role="alert">
           <span>{error.message}</span>
-          <button onClick={() => store.getState().clearError()} aria-label="Dismiss">
-            ×
-          </button>
+          <span className={styles.errorActions}>
+            <button
+              onClick={() => {
+                const s = store.getState()
+                s.clearError()
+                void (listed ? s.refresh() : s.init())
+              }}
+            >
+              Retry
+            </button>
+            <button onClick={() => store.getState().clearError()} aria-label="Dismiss">
+              ×
+            </button>
+          </span>
         </div>
       )}
       <FileList

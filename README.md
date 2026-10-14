@@ -31,8 +31,8 @@ Each connection opens as another column with the same file operations as the loc
   system keyring, and only if you ask; without a keyring nothing is stored.
 - **Jump hosts** (ProxyJump) are supported; imports pick them up from your config.
 - Dropped connections reconnect automatically with backoff, without prompting.
-- Remote machines have no Trash: Delete asks first and is permanent. Remote folders don't update by
-  themselves (SFTP can't report changes), so use F5.
+- Remote machines have no Trash: Delete asks first and is permanent. SFTP can't report changes, so open
+  remote folders are re-read every few seconds instead (see Settings); F5 refreshes right away.
 
 Integration tests start a real `sshd` as your user (needs `/usr/bin/sshd` and `sftp-server`); they skip
 themselves if OpenSSH's server isn't installed.
@@ -53,6 +53,35 @@ themselves if OpenSSH's server isn't installed.
 - **The transfer panel** at the bottom shows progress, speed and time left; you can cancel a job,
   and retry one that had errors (it skips what already arrived).
 
+## Settings
+
+Open **Settings** in the toolbar (or press **Ctrl+,**). Changes apply right away.
+
+- **Theme:** follow the system, light or dark.
+- **Transfers:** files copied at once per transfer and in total, how many transfers run at once, and
+  whether copies keep permissions and modification times.
+- **SSH folders:** how often open remote folders are re-read (0 turns it off).
+
+Settings live in `settings.json` in the app's data folder (`~/.config/ssh-bridger/`). A bad value falls
+back to its default, and a file that isn't valid JSON is moved aside as `settings.json.corrupt-…`.
+
+## Building packages
+
+```sh
+pnpm package       # AppImage, .deb and pacman package in ./release
+pnpm package:dir   # just the unpacked app in ./release/linux-unpacked, for a quick check
+```
+
+The `.deb` and pacman targets are built with `fpm`, whose bundled Ruby needs `libcrypt.so.1`. On Arch
+that comes from `libxcrypt-compat` (`sudo pacman -S libxcrypt-compat`); Debian and Ubuntu have it already.
+Set the real maintainer e-mail in `electron-builder.yml` and `package.json` before publishing.
+
+Large-transfer stress test (the default size is small so the normal suite stays quick):
+
+```sh
+BRIDGER_STRESS_MB=2600 pnpm exec vitest run test/integration/transfer-stress.test.ts
+```
+
 ## Keyboard shortcuts
 
 | Key                           | Action                                 |
@@ -62,6 +91,7 @@ themselves if OpenSSH's server isn't installed.
 | Alt+← / Alt+→                 | History back / forward                 |
 | Ctrl+L                        | Type a path                            |
 | F5                            | Refresh                                |
+| Ctrl+,                        | Settings                               |
 | Ctrl+H                        | Show or hide hidden files              |
 | Ctrl+A / Esc                  | Select all / clear selection           |
 | F2                            | Rename                                 |

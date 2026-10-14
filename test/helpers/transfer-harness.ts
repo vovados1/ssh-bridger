@@ -11,7 +11,12 @@ import type {
 } from '@shared/transfers'
 import { LocalProvider } from '../../src/main/fs/local-provider'
 import type { FileSystemProvider } from '../../src/main/fs/provider'
-import { TransferManager, type TransferDeps } from '../../src/main/transfer/transfer-manager'
+import {
+  DEFAULT_LIMITS,
+  TransferManager,
+  type TransferDeps,
+  type TransferLimits
+} from '../../src/main/transfer/transfer-manager'
 
 /** A second "machine" that is really the local disk, so every cross-machine code path runs. */
 export class FakeRemote extends LocalProvider {
@@ -28,15 +33,18 @@ export interface Harness {
   cancelledConflicts: string[]
   providers: Record<string, FileSystemProvider>
   /** Start a job and wait for it to finish. */
-  run(request: TransferRequest): Promise<JobSnapshot>
+  run(request: TransferRequest, ms?: number): Promise<JobSnapshot>
   /** Wait until a job reaches a status (or any finished one). */
   waitFor(jobId: string, predicate: (j: JobSnapshot) => boolean, ms?: number): Promise<JobSnapshot>
   /** Answer the next conflict(s) as they arrive. */
   autoAnswer(answers: ConflictAnswer[]): void
+  /** Live limits; change them and call `mgr.limitsChanged()`. */
+  limits: TransferLimits
   cleanup(): Promise<void>
 }
 
-export interface HarnessOptions extends Partial<Omit<TransferDeps, 'machines'>> {
+export interface HarnessOptions
+  extends Partial<Omit<TransferDeps, 'machines' | 'limits'>>, Partial<TransferLimits> {
   /** Replace the providers, e.g. with wrappers that misbehave. */
   wrap?(local: LocalProvider, remote: FakeRemote): Record<string, FileSystemProvider>
 }
@@ -52,8 +60,15 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
   const cancelledConflicts: string[] = []
   let answers: ConflictAnswer[] = []
 
-  const deps: Partial<Omit<TransferDeps, 'machines'>> = { ...options }
-  delete (deps as { wrap?: unknown }).wrap
+  const limits: TransferLimits = { ...DEFAULT_LIMITS }
+  const deps: Record<string, unknown> = { ...options }
+  delete deps['wrap']
+  for (const key of Object.keys(DEFAULT_LIMITS) as (keyof TransferLimits)[]) {
+    if (key in deps) {
+      ;(limits as unknown as Record<string, unknown>)[key] = deps[key]
+      delete deps[key]
+    }
+  }
   const mgr: TransferManager = new TransferManager({
     machines: {
       get(id) {
@@ -70,6 +85,7 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
     },
     emitConflictCancel: (id) => cancelledConflicts.push(id),
     flushMs: 20,
+    limits: () => limits,
     ...deps
   })
 
@@ -86,12 +102,14 @@ export async function harness(options: HarnessOptions = {}): Promise<Harness> {
   return {
     root,
     mgr,
+    limits,
     updates,
     conflicts,
     cancelledConflicts,
     providers,
     waitFor,
-    run: async (request) => waitFor(await mgr.start(request), (j) => FINISHED.includes(j.status)),
+    run: async (request, ms) =>
+      waitFor(await mgr.start(request), (j) => FINISHED.includes(j.status), ms),
     autoAnswer: (list) => {
       answers = [...list]
     },

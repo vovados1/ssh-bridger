@@ -288,6 +288,22 @@ Each milestone ends with something runnable.
 - Error/empty/loading states, and a large-transfer stress test.
 - electron-builder packaging (AppImage, deb, pacman), app icon, versioning.
 
+Decisions made while building it:
+
+- **Theme** is applied by setting `nativeTheme.themeSource` in main, so the existing
+  `prefers-color-scheme` CSS follows the choice and the very first paint is already right. There is no
+  theme code in the renderer.
+- **Settings** are validated field by field with a default for each (`.catch`), so an old or hand-edited
+  file never blocks startup. Limits are read live: the global file limit resizes a running semaphore,
+  and the per-transfer limit applies to the next transfer.
+- **Remote polling** is a quiet re-list per remote column (no spinner, no selection change, nothing
+  redrawn unless the listing differs), skipped while the window is hidden or a name is being typed. It
+  never takes a request sequence number, so it can't cancel a navigation.
+- **TCP_NODELAY** is switched on for every SSH connection. Without it, OpenSSH's delayed ACKs added about
+  40 ms to each SFTP request, which capped small-file copies at ~7 files/s; now ~1,700/s locally.
+- **Reader backpressure:** `SftpReadStream` only pushes while the consumer wants data. It used to push
+  on every completed read and buffered the whole file whenever the disk was slower than the network.
+
 ## 7. Testing strategy
 
 - **Provider contract tests**: one Vitest suite parameterized over `LocalProvider` (tmp dir) and

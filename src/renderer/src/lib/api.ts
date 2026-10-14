@@ -1,5 +1,6 @@
 import { unwrap, type FsClient } from './fs-client'
 import type { ConnectionsClient } from './connections-client'
+import type { SettingsClient } from './settings-client'
 import type { TransfersClient } from './transfers-client'
 
 /** The real FsClient, backed by the preload bridge. Renderer code should not touch `window.api`. */
@@ -55,4 +56,10 @@ export const transfersClient: TransfersClient = {
     window.api.events.on('transfer:conflictCancel', (e) => listener(e.id)),
   loadLayout: () => unwrap(window.api.layout.load()),
   saveLayout: (layout) => unwrap(window.api.layout.save(layout))
+}
+
+export const settingsClient: SettingsClient = {
+  load: () => unwrap(window.api.settings.load()),
+  save: (settings) => unwrap(window.api.settings.save(settings)),
+  onChanged: (listener) => window.api.events.on('settings:changed', listener)
 }

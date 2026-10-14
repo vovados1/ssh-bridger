@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell } from 'electron'
+import icon from '../../resources/icon.png?asset'
 import { registerIpcHandlers } from './ipc'
 
 function createWindow(): BrowserWindow {
@@ -10,6 +11,9 @@ function createWindow(): BrowserWindow {
     minHeight: 400,
     show: false,
     title: 'SSH Bridger',
+    icon,
+    // Matches --bg, so a dark theme doesn't flash white while the page loads.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#ffffff',
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -22,6 +26,11 @@ function createWindow(): BrowserWindow {
   })
 
   win.once('ready-to-show', () => win.show())
+
+  // A crashed renderer would leave a blank window; the layout is saved, so reloading is cheap.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason !== 'clean-exit' && !win.isDestroyed()) win.webContents.reload()
+  })
 
   // Never open new Electron windows; hand http(s) links to the system browser.
   win.webContents.setWindowOpenHandler(({ url }) => {

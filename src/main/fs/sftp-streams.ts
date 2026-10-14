@@ -44,6 +44,8 @@ export class SftpReadStream extends Readable {
   private readonly ready = new Map<number, Buffer>()
   private inflight = 0
   private ended = false
+  /** The consumer has room: set by `_read`, cleared when `push` says it is full. */
+  private wanting = false
   private readonly stopWatching: () => void
 
   constructor(
@@ -60,6 +62,7 @@ export class SftpReadStream extends Readable {
   }
 
   override _read(): void {
+    this.wanting = true
     this.pump()
   }
 
@@ -75,12 +78,14 @@ export class SftpReadStream extends Readable {
   private pump(): void {
     if (this.destroyed || this.ended) return
 
-    // Hand over finished chunks in file order; stop when the consumer is full.
-    while (this.ready.has(this.emitIndex)) {
+    // Hand over finished chunks in file order, but only while the consumer wants more. Pushing
+    // regardless (this runs on every completed read, not only on `_read`) would buffer the whole
+    // file in memory whenever the destination is slower than the network.
+    while (this.wanting && this.ready.has(this.emitIndex)) {
       const buf = this.ready.get(this.emitIndex)!
       this.ready.delete(this.emitIndex)
       this.emitIndex++
-      if (!this.push(buf)) break
+      if (!this.push(buf)) this.wanting = false
     }
 
     if (this.nextOffset >= this.size && this.inflight === 0 && this.ready.size === 0) {

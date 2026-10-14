@@ -219,6 +219,9 @@ export class ConnectionManager {
       signal.addEventListener('abort', onAbort, { once: true })
       const settle = (): void => signal.removeEventListener('abort', onAbort)
 
+      // Without this, small writes wait for the previous ACK; paired with the server's delayed
+      // ACKs that adds ~40 ms to every SFTP request, which is what makes small files crawl.
+      client.once('connect', () => client.setNoDelay(true))
       client.once('ready', () => {
         settle()
         resolve()

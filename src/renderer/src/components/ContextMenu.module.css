@@ -22,7 +22,7 @@
 
 .item[data-active='true'] {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .item[aria-disabled='true'] {

@@ -15,6 +15,7 @@ import { notify } from '../lib/toasts'
 import {
   transfersStore,
   useConnections,
+  useSettings,
   useTransfers,
   useWorkspace,
   workspaceStore
@@ -110,6 +111,7 @@ function ColumnSlot({
 }) {
   const states = useConnections((s) => s.states)
   const clipboard = useTransfers((s) => s.clipboard)
+  const pollSeconds = useSettings((s) => s.settings.remotePollSeconds)
   const profileId = c.profileId
 
   // Items cut on this column's machine are dimmed here; elsewhere a cut means nothing.
@@ -155,6 +157,7 @@ function ColumnSlot({
           notify={notify}
           canTrash={profileId === undefined}
           transfer={transfer}
+          pollSeconds={pollSeconds}
           {...(c.color ? { color: c.color } : {})}
           {...(c.initial ? { initial: c.initial } : {})}
           onViewChange={(view) => workspaceStore.getState().updateColumnView(c.id, view)}

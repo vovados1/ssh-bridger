@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 
 const shared = resolve('src/shared')
+const { version } = JSON.parse(readFileSync('package.json', 'utf8')) as { version: string }
 
 // Strict CSP in production. Dev needs inline scripts (React refresh preamble) and a
 // websocket for HMR, so the policy is relaxed only while `electron-vite dev` runs.
@@ -33,6 +35,7 @@ export default defineConfig({
   preload: { resolve: { alias: { '@shared': shared } } },
   renderer: {
     resolve: { alias: { '@shared': shared, '@': resolve('src/renderer/src') } },
+    define: { __APP_VERSION__: JSON.stringify(version) },
     build: { minify: 'esbuild' },
     plugins: [react(), csp()]
   }

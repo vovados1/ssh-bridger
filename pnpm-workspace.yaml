@@ -3,5 +3,7 @@ allowBuilds:
   # Electron-ABI rebuild to load, so we run on ssh2's pure-JS fallback instead.
   cpu-features: false
   electron: true
+  # Windows-only installer support pulled in by electron-builder; this app ships for Linux only.
+  electron-winstaller: false
   esbuild: true
   ssh2: false

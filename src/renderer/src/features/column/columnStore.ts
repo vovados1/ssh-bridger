@@ -48,6 +48,11 @@ export interface ColumnState {
   forward(): Promise<void>
   up(): Promise<void>
   refresh(): Promise<void>
+  /**
+   * Re-read the folder in the background, for machines that can't announce changes. Shows no
+   * spinner, stays silent on failure and leaves everything alone unless the listing changed.
+   */
+  poll(): Promise<void>
   open(entry: Entry): Promise<void>
   openCursor(): Promise<void>
   clearError(): void
@@ -100,6 +105,11 @@ export type ColumnStore = StoreApi<ColumnState>
 
 type HistoryMode = 'push' | 'keep'
 
+/** Whether two listings show the same thing, so an unchanged poll doesn't redraw anything. */
+function sameListing(a: Entry[], b: Entry[]): boolean {
+  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b)
+}
+
 function errorData(err: unknown): FsErrorData {
   return err instanceof FsError
     ? err.toData()
@@ -132,54 +142,64 @@ export function createColumnStore({
       try {
         const entries = await fs.list(machineId, path)
         if (seq !== requestSeq) return false
-        const s = get()
-        const visible = computeVisible(entries, s.showHidden, s.sortKey, s.sortDir)
-        const paths = new Set(visible.map((e) => e.path))
-
-        let selected: ReadonlySet<string> = new Set()
-        let cursor: string | null = null
-        let anchor: string | null = null
-        if (opts.keepSelection) {
-          selected = new Set([...s.selected].filter((p) => paths.has(p)))
-          cursor = s.cursor && paths.has(s.cursor) ? s.cursor : null
-          anchor = s.anchor && paths.has(s.anchor) ? s.anchor : null
-        }
-        if (opts.cursor && paths.has(opts.cursor)) {
-          cursor = opts.cursor
-          anchor = opts.cursor
-          selected = new Set([opts.cursor])
-        }
-        cursor ??= visible[0]?.path ?? null
-
-        const renaming = s.renaming && paths.has(s.renaming) ? s.renaming : null
-        const folderChanged = path !== s.cwd
-
-        let { history: hist, historyIndex } = s
-        if (history === 'push' && hist[historyIndex] !== path) {
-          hist = [...hist.slice(0, historyIndex + 1), path]
-          historyIndex = hist.length - 1
-        }
-        set({
-          cwd: path,
-          entries,
-          visible,
-          selected,
-          cursor,
-          anchor,
-          renaming,
-          history: hist,
-          historyIndex,
-          loading: false,
-          error: null
-        })
-        // Fire and forget: if live updates aren't available, manual refresh still works.
-        if (folderChanged) void fs.watch(machineId, path, watchKey).catch(() => {})
-        return true
+        return apply(path, entries, history, opts)
       } catch (err) {
         if (seq !== requestSeq) return false
         set({ loading: false, error: errorData(err) })
         return false
       }
+    }
+
+    /** Make a fresh listing the current one. */
+    function apply(
+      path: string,
+      entries: Entry[],
+      history: HistoryMode,
+      opts: { cursor?: string | null; keepSelection?: boolean }
+    ): boolean {
+      const s = get()
+      const visible = computeVisible(entries, s.showHidden, s.sortKey, s.sortDir)
+      const paths = new Set(visible.map((e) => e.path))
+
+      let selected: ReadonlySet<string> = new Set()
+      let cursor: string | null = null
+      let anchor: string | null = null
+      if (opts.keepSelection) {
+        selected = new Set([...s.selected].filter((p) => paths.has(p)))
+        cursor = s.cursor && paths.has(s.cursor) ? s.cursor : null
+        anchor = s.anchor && paths.has(s.anchor) ? s.anchor : null
+      }
+      if (opts.cursor && paths.has(opts.cursor)) {
+        cursor = opts.cursor
+        anchor = opts.cursor
+        selected = new Set([opts.cursor])
+      }
+      cursor ??= visible[0]?.path ?? null
+
+      const renaming = s.renaming && paths.has(s.renaming) ? s.renaming : null
+      const folderChanged = path !== s.cwd
+
+      let { history: hist, historyIndex } = s
+      if (history === 'push' && hist[historyIndex] !== path) {
+        hist = [...hist.slice(0, historyIndex + 1), path]
+        historyIndex = hist.length - 1
+      }
+      set({
+        cwd: path,
+        entries,
+        visible,
+        selected,
+        cursor,
+        anchor,
+        renaming,
+        history: hist,
+        historyIndex,
+        loading: false,
+        error: null
+      })
+      // Fire and forget: if live updates aren't available, manual refresh still works.
+      if (folderChanged) void fs.watch(machineId, path, watchKey).catch(() => {})
+      return true
     }
 
     function recompute(patch: Partial<ColumnState>): void {
@@ -312,6 +332,21 @@ export function createColumnStore({
             return
           }
           if (dir === '/' || get().error?.code !== 'ENOENT') return
+        }
+      },
+
+      async poll() {
+        const { cwd, entries: before, loading, renaming } = get()
+        // Don't compete with a load in progress, or move rows under someone who is typing a name.
+        if (cwd === null || loading || renaming !== null) return
+        const seq = requestSeq // not incremented: a poll must never invalidate the user's navigation
+        try {
+          const entries = await fs.list(machineId, cwd)
+          if (seq !== requestSeq || get().cwd !== cwd || get().renaming !== null) return
+          if (sameListing(before, entries)) return
+          apply(cwd, entries, 'keep', { keepSelection: true })
+        } catch {
+          // Offline or the folder is gone: the next real action reports it.
         }
       },
 
