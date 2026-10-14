@@ -22,7 +22,7 @@ export interface AuthServer {
  * keyboard-interactive flows.
  */
 export async function startAuthServer(options: AuthServerOptions): Promise<AuthServer> {
-  const hostKey = utils.generateKeyPairSync('ed25519')
+  const hostKey = generateUsableKey()
   const attempts: string[] = []
   const clients = new Set<Connection>()
 
@@ -71,4 +71,17 @@ function methods(o: AuthServerOptions): AuthenticationType[] {
   if (o.password !== undefined) list.push('password')
   if (o.keyboard) list.push('keyboard-interactive')
   return list
+}
+
+/**
+ * ssh2's generator occasionally (about 1 in 300) emits an OpenSSH key that its own parser
+ * rejects as malformed, which made tests flaky. Keep generating until the key parses.
+ */
+export function generateUsableKey(passphrase?: string): { private: string; public: string } {
+  for (;;) {
+    const key = passphrase
+      ? utils.generateKeyPairSync('ed25519', { passphrase, cipher: 'aes256-ctr', rounds: 4 })
+      : utils.generateKeyPairSync('ed25519')
+    if (!(utils.parseKey(key.private, passphrase) instanceof Error)) return key
+  }
 }
